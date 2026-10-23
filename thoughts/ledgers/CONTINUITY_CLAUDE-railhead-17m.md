@@ -79,8 +79,16 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
         hold continuation; labellers switched 17:55. DatasetConfig.continuation filter + climb moves
   - [x] Climb loop retrains a Bekko-68M teacher each pass (17:13 teacher: val play_regret 0.270 vs longest 0.248)
   - [x] Ensemble play (comma-separated model dirs); running ens-1023-1627 closed loop
-- Now: [→] climb pass 7 (17:13, 811 ex, distillation moves first, threshold 0.0073); play-ens; v4 labelling
-- Next: compare v4-trained model vs v3 in closed loop once v4 labels accumulate; DAgger after pass 7
+  - [x] devhub closed-loop suite (26 Hub dev maps 256x256, 2 seeds, paired bootstrap on asinh net worth):
+        incumbent-1627 vs random +0.171 [-0.231,+0.529], vs longest +0.269 [-0.120,+0.614] (n.s.)
+  - [x] KEY FINDING: val gains did not transfer. Pass-7 self-distilled (kept offline) -0.405 [-0.787,-0.036]
+        and ensemble-distilled -0.440 [-0.836,-0.074] vs incumbent-1627 in closed loop. Incumbent restored to
+        1023-1627-base-s1. 3-seed ensemble of 1627 also worse on 11 local maps (0.650 vs 0.735; noisy)
+  - [x] Closed-loop gate in climb loop (rh17m gate, runs/climb/gates.jsonl); climb judges on lbl-v4 val;
+        label-generation moves first, distillation last
+  - [→] Diagnostic: pass-7 undistilled base (1023-1713-base-s2) on devhub (window devhub-b7): data vs distill
+- Now: [→] climb pass 8 (21:02, 1233 ex, 222 val) with teacher retrain, v4-val judging, closed-loop gate
+- Next: if v4-only training wins offline AND in the gate, the label generation question is settled
 - Open: UNCONFIRMED flaky unit test (1 failure once under heavy load, not reproduced in 4 runs)
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
 - Remaining:
