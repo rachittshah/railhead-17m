@@ -89,7 +89,10 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   - [x] Diagnostic (26 devhub maps): pass-7 base (no distill) vs incumbent-1627 -0.123 [-0.406,+0.179] (data
         change n.s.); self-distill vs pass-7 base -0.282 [-0.634,+0.037]; ens-distill vs base -0.317
         [-0.667,+0.002] -> DISTILLATION ITSELF HURTS closed loop despite val gains. Moves now last + gated.
-- Now: [→] climb pass 8 (21:02, 1233 ex, 222 val) with teacher retrain, v4-val judging, closed-loop gate
+  - [x] Pass 8 artifact: 'expansions:false' kept because its val had fewer options (lower regret by
+        construction). Fix: all configs judged on the same decisions (options/values/targets from the base
+        config; only text keys follow the candidate). Incumbent restored again to 1023-1627-base-s1.
+- Now: [→] climb pass 9 (22:37, 1356 ex, 247 val; v4 val judging; same-decision judging; closed-loop gate)
 - Next: if v4-only training wins offline AND in the gate, the label generation question is settled
 - Open: UNCONFIRMED flaky unit test (1 failure once under heavy load, not reproduced in 4 runs)
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
