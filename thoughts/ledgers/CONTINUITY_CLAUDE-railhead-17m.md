@@ -72,7 +72,15 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   - [x] Ensemble distillation (@ensemble = incumbent's seed models); obs-v3 (with expansions) regenerating
   - [x] Keep rule: noise = max(seed sample-std floor, |A/A control diff|) (pass 5 control +0.0050 > floor 0.0025)
   - Closed loop under play-v3: baselines re-running (runs/play/baselines-v3); v1/v2 games archived
-- Now: [→] climb pass 6 (16:27, 745 ex, 128 val, 3 seeds, exp_regret); labellers train x11, val x8, test x3
+  - [x] CLOSED LOOP (play-v3, 11 dev maps, wake 180 d): incumbent 1023-1627-base-s1 mean arena score 0.735 vs
+        random 0.733 vs longest 0.665; asinh net worth 4.213 vs 4.227 vs 3.656 (model ~= random, >> longest).
+        Model expands a lot (10-17 of ~20 builds/game). Arena score saturates at 1.0 on rich maps.
+  - [x] lbl-v4: rollouts continue with an 'expand' policy (1 plane on best route every 182 d) to fix myopia of
+        hold continuation; labellers switched 17:55. DatasetConfig.continuation filter + climb moves
+  - [x] Climb loop retrains a Bekko-68M teacher each pass (17:13 teacher: val play_regret 0.270 vs longest 0.248)
+  - [x] Ensemble play (comma-separated model dirs); running ens-1023-1627 closed loop
+- Now: [→] climb pass 7 (17:13, 811 ex, distillation moves first, threshold 0.0073); play-ens; v4 labelling
+- Next: compare v4-trained model vs v3 in closed loop once v4 labels accumulate; DAgger after pass 7
 - Open: UNCONFIRMED flaky unit test (1 failure once under heavy load, not reproduced in 4 runs)
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
 - Remaining:
