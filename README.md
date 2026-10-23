@@ -9,6 +9,32 @@ counterfactual labels**: every option is actually built in a fork of the game an
 
 Status: work in progress. Results land in `runs/` and in the tables below as they are measured.
 
+## Results so far (2026-10-23, incumbent `1023-1627-base-s1`)
+
+**Closed loop**, 11 held-out 512x512 dev maps (10-year games + run-off), one seed per map, a decision every 180
+days, player `play-v3` (falls back to the next option when a build fails without spending; routes and
+"add planes" expansions). Arena score is Railhead's `tycoon_log` (saturates at 1.0 on rich maps).
+
+| policy | mean arena score | mean asinh(final net worth / £100k) | model wins (maps) |
+|---|---|---|---|
+| **railhead-17m** | **0.735** | **4.213** | |
+| random option | 0.733 | 4.227 | 6/11 |
+| always longest route | 0.665 | 3.656 | 6/11 |
+| hold (do nothing) | 0.000 | | |
+
+**Offline**, simulator-valued decisions (asinh units; 0.1 is about 10% of net worth at the horizon):
+
+| split | n | model regret | model play_regret | longest regret | longest play_regret | uniform play_regret |
+|---|---|---|---|---|---|---|
+| val | 128 | 0.210 | 0.190 | 0.258 | 0.223 | 0.480 |
+| test | 82 | 0.316 | 0.295 | 0.635 | 0.568 | 1.070 |
+
+`play_regret` replays the closed-loop player offline (options in the model's order, skipping builds that
+failed). Hillclimbing (`runs/climb/ledger.jsonl`) uses seed-matched 3-seed comparisons with an A/A control per
+pass; it has kept no move beyond noise at this data size (≈800 decisions); data and the action space
+(expansions, continuation policy) have moved results, not settings. Next: `lbl-v4` labels (rollouts keep
+adding planes after the option), ensemble distillation, DAgger.
+
 ## How the labels are made
 
 ```
