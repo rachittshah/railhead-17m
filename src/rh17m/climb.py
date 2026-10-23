@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import statistics
 import subprocess
 import time
 from dataclasses import asdict
@@ -231,8 +232,9 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
     inc_dirs = train_seeds(inc_cfg, f"{stamp}-base")
     val0 = val_for(inc_cfg)
     _, inc_m, by_seed = score(inc_dirs, val0)
-    # Std of a difference of two k-seed means ~ seed std * sqrt(2/k); the seed std from the range of k seeds.
-    seed_sd = (max(by_seed) - min(by_seed)) / 1.128 if len(by_seed) > 1 else 0.0
+    # Std of a difference of two k-seed means ~ seed std * sqrt(2/k), with the seed std estimated from the
+    # incumbent's k seeds (sample std; the range/1.128 shortcut is only right for k=2).
+    seed_sd = statistics.stdev(by_seed) if len(by_seed) > 1 else 0.0
     noise = seed_sd * math.sqrt(2 / len(seeds))
     log({"kind": "noise_floor", "run": f"{stamp}-base", "metric": METRIC, "by_seed": by_seed, "noise": noise,
          "val": inc_m, "seeds": list(seeds)})
