@@ -34,7 +34,8 @@
   "freeze_embeddings": false,
   "freeze_layers": 0,
   "select_metric": "exp_regret",
-  "patience": 3
+  "patience": 3,
+  "distill_ref": "@incumbent"
  },
  "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-1713-coarse05-s2/model",
  "val": {

@@ -54,6 +54,7 @@ class TrainConfig:
     distill_max: int = 0  # cap on teacher-labelled examples (0 = all available)
     distill_temperature: float = 1.0  # extra temperature on the teacher's probabilities
     obs_dir: str = "obs-v3"  # unlabelled observations for distillation, under the labels dir's parent
+    distill_ref: str = ""  # symbolic teacher (@incumbent, @ensemble, @teacher) that distill_from was resolved from
     freeze_embeddings: bool = False  # keep the token embeddings at their pretrained values
     freeze_layers: int = 0  # freeze the first N encoder layers (-1: the whole encoder, train the heads only)
     select_metric: str = "exp_regret"  # val metric that picks the epoch (exp_regret | play_regret | regret | nll)

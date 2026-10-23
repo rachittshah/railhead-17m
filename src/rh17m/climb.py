@@ -91,7 +91,8 @@ def apply(cfg: TrainConfig, move: dict, name: str, incumbent_dir: Path | None = 
         teacher = resolve_teacher(move["distill_from"], incumbent_dir, incumbent_seeds)
         if teacher is None:
             return None
-        move = {**move, "distill_from": teacher}
+        ref = move["distill_from"] if str(move["distill_from"]).startswith("@") else ""
+        move = {**move, "distill_from": teacher, "distill_ref": ref}
     for k, v in move.items():
         if k == "_control":
             continue
@@ -236,6 +237,14 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
         return min(dirs, key=lambda d: _val_scores(d, val)[1][METRIC])
 
     inc_cfg = copy.deepcopy(base)
+    if inc_cfg.distill_ref and INCUMBENT.exists():
+        # A kept "distil from the incumbent" means distil from whatever the incumbent is now: the previous
+        # pass's deployed model (iterated self-distillation), not the model of the pass that kept the move.
+        prev = json.loads(INCUMBENT.read_text())
+        resolved = resolve_teacher(inc_cfg.distill_ref, Path(prev["model_dir"]),
+                                   [Path(d) for d in prev.get("seed_dirs", [])])
+        if resolved:
+            inc_cfg.distill_from = resolved
     inc_dirs = train_seeds(inc_cfg, f"{stamp}-base")
     val0 = val_for(inc_cfg)
     _, inc_m, by_seed = score(inc_dirs, val0)
