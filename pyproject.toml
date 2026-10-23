@@ -1,0 +1,48 @@
+[project]
+name = "railhead-17m"
+version = "0.1.0"
+description = "A 17M-parameter System-1 decision model for Railhead (OpenTTD): simulator-labelled decisions, an MLX Bekko port, and a hillclimb loop."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Rachitt Shah" }]
+dependencies = [
+    "railhead",
+    "railhead-system1",
+    "decision-mlx",
+    "mlx>=0.32",
+    "numpy>=2",
+    "safetensors>=0.6",
+    "tokenizers>=0.21",
+    "huggingface_hub>=0.34",
+    "pyarrow>=20",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-timeout>=2.3", "ruff>=0.6"]
+# The published Bekko runtime, used only as the parity reference for the MLX port.
+reference = ["decision-mlx[bekko]"]
+
+[project.scripts]
+rh17m = "rh17m.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rh17m"]
+
+[tool.uv.sources]
+railhead = { path = "../railhead", editable = true }
+railhead-system1 = { path = "../railhead-system1", editable = true }
+decision-mlx = { path = "../labs/decision-mlx", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs the patched OpenTTD engine or model weights"]
+timeout = 900
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
