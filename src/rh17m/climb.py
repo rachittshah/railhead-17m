@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import subprocess
 import time
 from dataclasses import asdict
@@ -124,13 +125,20 @@ def load_incumbent() -> TrainConfig | None:
     return cfg
 
 
-def save_incumbent(cfg: TrainConfig, model_dir: Path, val: dict) -> None:
+def save_incumbent(cfg: TrainConfig, model_dir: Path, val: dict, seed_dirs: list[Path] | None = None) -> None:
+    """``model_dir`` is the deployed model (the incumbent config's best seed); ``seed_dirs`` all its seeds."""
     INCUMBENT.write_text(json.dumps({"config": asdict(cfg), "model_dir": str(model_dir), "val": val,
+                                     "seed_dirs": [str(d) for d in seed_dirs or [model_dir]],
                                      "saved": time.strftime("%Y-%m-%d %H:%M:%S")}, indent=1))
 
 
-def climb(base: TrainConfig, labels_dir: Path, noise_seeds: int = 3, max_runs: int = 60,
+def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), max_runs: int = 60,
           push: bool = True, on_keep=None) -> TrainConfig:
+    """One climb pass. Every config (the incumbent and each candidate) is trained once per seed in ``seeds``;
+    a config's score on a val example is its mean expected regret over those seed models, so candidate and
+    incumbent are compared like for like (a best-of-seeds incumbent would be a winner's curse). A move is
+    kept when the paired bootstrap interval of the per-example difference is entirely below zero and the
+    mean difference exceeds the seed noise of a seed-averaged score (estimated from the incumbent's seeds)."""
     CLIMB_DIR.mkdir(parents=True, exist_ok=True)
     ledger = CLIMB_DIR / "ledger.jsonl"
     stamp = time.strftime("%m%d-%H%M")
@@ -140,83 +148,97 @@ def climb(base: TrainConfig, labels_dir: Path, noise_seeds: int = 3, max_runs: i
             f.write(json.dumps(row) + "\n")
 
     try:
-        from decision_mlx.tracking import Tracker, system_metrics  # noqa: F401 - PRs #7-#10
-        if not hasattr(Tracker, "log_table"):
+        from decision_mlx.tracking import Tracker
+        if not hasattr(Tracker, "log_table"):  # PRs #7-#10
             raise ImportError
     except ImportError:  # the local decision-mlx checkout predates those PRs
         from rh17m._tracking import Tracker
     tracker = Tracker("railhead-17m-climb", name=f"climb-{stamp}", config={"base": asdict(base),
-                      "noise_seeds": noise_seeds, "max_runs": max_runs})
+                      "seeds": list(seeds), "max_runs": max_runs})
     moves_rows: list[list] = []
 
-    def train(cfg: TrainConfig) -> Path:
-        cfg.group = f"climb-{stamp}"
-        cfg.artifact = False  # only kept models become artifacts (below)
-        out = ROOT / "runs" / "train" / cfg.name
-        run(cfg, labels_dir, out)
-        return out / "model"
+    def train_seeds(cfg: TrainConfig, name: str) -> list[Path]:
+        dirs = []
+        for sd in seeds:
+            c = copy.deepcopy(cfg)
+            c.seed, c.name, c.group, c.artifact = sd, f"{name}-s{sd}", f"climb-{stamp}", False
+            run(c, labels_dir, ROOT / "runs" / "train" / c.name)
+            dirs.append(ROOT / "runs" / "train" / c.name / "model")
+        return dirs
 
-    # Noise floor: the same config, different seeds.
-    seeds_val = []
-    inc_cfg, inc_dir = base, None
-    for s in range(noise_seeds):
-        cfg = apply(base, {"seed": s}, f"{stamp}-base-s{s}")
-        d = train(cfg)
-        val = [e for e in load_examples(labels_dir, DatasetConfig(**cfg.data)) if e["split"] == "val"]
-        _, m = _val_scores(d, val)
-        seeds_val.append(m["exp_regret"])
-        log({"run": cfg.name, "kind": "noise", "config": asdict(cfg), "val": m})
-        if inc_dir is None or m["exp_regret"] <= min(seeds_val):
-            inc_cfg, inc_dir = cfg, d
-    noise = max(seeds_val) - min(seeds_val)
-    log({"kind": "noise_floor", "exp_regret_by_seed": seeds_val, "noise": noise})
-    tracker.log({"climb/noise_floor": noise, "climb/base_exp_regret": min(seeds_val)}, step=0)
-    tracker.alert(f"climb-{stamp}: noise floor {noise:.4f}",
-                  f"val exp_regret by seed {[round(v, 4) for v in seeds_val]}", level="info")
-    save_incumbent(inc_cfg, inc_dir, {"exp_regret": min(seeds_val)})
-    runs = noise_seeds
+    def val_for(cfg: TrainConfig) -> list[dict]:
+        return sorted((e for e in load_examples(labels_dir, DatasetConfig(**cfg.data)) if e["split"] == "val"),
+                      key=lambda e: e["id"])
+
+    def score(dirs: list[Path], val: list[dict]) -> tuple[list[float], dict, list[float]]:
+        per_seed, mets = [], []
+        for d in dirs:
+            a, m = _val_scores(d, val)
+            per_seed.append(a)
+            mets.append(m)
+        mean = [sum(col) / len(col) for col in zip(*per_seed, strict=True)]
+        avg = {k: sum(m[k] for m in mets) / len(mets) for k in mets[0]}
+        return mean, avg, [m["exp_regret"] for m in mets]
+
+    def best_seed(dirs: list[Path], val: list[dict]) -> Path:
+        return min(dirs, key=lambda d: _val_scores(d, val)[1]["exp_regret"])
+
+    inc_cfg = copy.deepcopy(base)
+    inc_dirs = train_seeds(inc_cfg, f"{stamp}-base")
+    val0 = val_for(inc_cfg)
+    _, inc_m, by_seed = score(inc_dirs, val0)
+    # Std of a difference of two k-seed means ~ seed std * sqrt(2/k); the seed std from the range of k seeds.
+    seed_sd = (max(by_seed) - min(by_seed)) / 1.128 if len(by_seed) > 1 else 0.0
+    noise = seed_sd * math.sqrt(2 / len(seeds))
+    log({"kind": "noise_floor", "run": f"{stamp}-base", "exp_regret_by_seed": by_seed, "noise": noise,
+         "val": inc_m, "seeds": list(seeds)})
+    tracker.log({"climb/noise_floor": noise, "climb/base_exp_regret": inc_m["exp_regret"]}, step=0)
+    tracker.alert(f"climb-{stamp}: base {inc_m['exp_regret']:.4f}, noise {noise:.4f}",
+                  f"val exp_regret by seed {[round(v, 4) for v in by_seed]}", level="info")
+    deploy = best_seed(inc_dirs, val0)
+    save_incumbent(inc_cfg, deploy, inc_m, inc_dirs)
+    runs = len(seeds)
     for phase, moves in (("coarse", coarse_moves()), ("fine", None)):
         moves = moves if moves is not None else fine_moves(inc_cfg)
         for i, move in enumerate(moves):
             if runs >= max_runs:
-                return inc_cfg
-            cfg = apply(inc_cfg, move, f"{stamp}-{phase}{i:02d}", inc_dir)
+                break
+            name = f"{stamp}-{phase}{i:02d}"
+            cfg = apply(inc_cfg, move, name, deploy)
             if cfg is None:  # e.g. no teacher trained yet
-                log({"run": f"{stamp}-{phase}{i:02d}", "kind": phase, "move": move, "skipped": "unresolved"})
+                log({"run": name, "kind": phase, "move": move, "skipped": "unresolved"})
                 continue
-            cand_dir = train(cfg)
-            runs += 1
-            val = [e for e in load_examples(labels_dir, DatasetConfig(**cfg.data)) if e["split"] == "val"]
-            # Compare on the candidate's val examples; the incumbent is re-scored on exactly these.
-            inc_val = [e for e in load_examples(labels_dir, DatasetConfig(**inc_cfg.data)) if e["split"] == "val"]
-            ids = {e["id"] for e in val} & {e["id"] for e in inc_val}
-            val = [e for e in val if e["id"] in ids]
-            inc_val = sorted((e for e in inc_val if e["id"] in ids), key=lambda e: e["id"])
-            val.sort(key=lambda e: e["id"])
-            a, ma = _val_scores(cand_dir, val)
-            b, mb = _val_scores(inc_dir, inc_val)
+            cand_dirs = train_seeds(cfg, name)
+            runs += len(seeds)
+            # Both configs are scored on the val examples they share (min_spread may drop some).
+            cand_val, inc_val = val_for(cfg), val_for(inc_cfg)
+            ids = {e["id"] for e in cand_val} & {e["id"] for e in inc_val}
+            cand_val = [e for e in cand_val if e["id"] in ids]
+            inc_val = [e for e in inc_val if e["id"] in ids]
+            a, ma, _ = score(cand_dirs, cand_val)
+            b, mb, _ = score(inc_dirs, inc_val)
             diff, lo, hi = bootstrap_diff(a, b)
             keep = diff < -noise and hi < 0
-            log({"run": cfg.name, "kind": phase, "move": move, "val": ma, "incumbent_val": mb,
-                 "diff_exp_regret": diff, "ci": [lo, hi], "noise": noise, "kept": keep, "n_val": len(val)})
+            log({"run": name, "kind": phase, "move": move, "val": ma, "incumbent_val": mb, "diff_exp_regret": diff,
+                 "ci": [lo, hi], "noise": noise, "kept": keep, "n_val": len(ids), "seeds": list(seeds)})
             tracker.log({"climb/candidate_exp_regret": ma["exp_regret"], "climb/incumbent_exp_regret": mb["exp_regret"],
                          "climb/diff": diff, "climb/ci_low": lo, "climb/ci_high": hi, "climb/kept": float(keep),
-                         "climb/candidate_regret": ma["regret"], "climb/n_val": len(val)}, step=runs)
-            moves_rows.append([cfg.name, phase, json.dumps(move), round(ma["exp_regret"], 4), round(mb["exp_regret"], 4),
-                               round(diff, 4), round(lo, 4), round(hi, 4), keep, len(val)])
+                         "climb/candidate_regret": ma["regret"], "climb/n_val": len(ids)}, step=runs)
+            moves_rows.append([name, phase, json.dumps(move), round(ma["exp_regret"], 4), round(mb["exp_regret"], 4),
+                               round(diff, 4), round(lo, 4), round(hi, 4), keep, len(ids)])
             if keep:
-                inc_cfg, inc_dir = cfg, cand_dir
-                save_incumbent(inc_cfg, inc_dir, ma)
+                inc_cfg, inc_dirs = cfg, cand_dirs
+                deploy = best_seed(inc_dirs, cand_val)
+                save_incumbent(inc_cfg, deploy, ma, inc_dirs)
                 tracker.alert(f"kept {json.dumps(move)}", f"val exp_regret {ma['exp_regret']:.4f}, diff {diff:+.4f} "
                               f"[{lo:+.4f}, {hi:+.4f}] beyond noise {noise:.4f}", level="info")
-                tracker.log_artifact(cand_dir, name="railhead-17m", type="model", aliases=["incumbent", cfg.name])
+                tracker.log_artifact(deploy, name="railhead-17m", type="model", aliases=["incumbent", name])
                 if on_keep:
-                    on_keep(cfg, cand_dir, ma)
+                    on_keep(cfg, deploy, ma)
                 if push:
                     _git_push(f"Climb: keep {json.dumps(move)} (val exp_regret {ma['exp_regret']:.4f}, "
                               f"diff {diff:+.4f} [{lo:+.4f}, {hi:+.4f}])",
-                              [ledger, INCUMBENT, ROOT / "runs" / "train" / cfg.name / "results.json",
-                               ROOT / "runs" / "train" / cfg.name / "config.json"])
+                              [ledger, INCUMBENT, deploy.parent / "results.json", deploy.parent / "config.json"])
     _climb_report(tracker, stamp, moves_rows, inc_cfg, noise, runs)
     tracker.save_files(str(ledger), str(INCUMBENT))
     tracker.finish()

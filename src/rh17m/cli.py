@@ -128,7 +128,7 @@ def _climb(a: argparse.Namespace) -> int:
             base.data[k[5:]] = json.loads(v)
         else:
             setattr(base, k, json.loads(v))
-    best = climb(base, Path(a.labels), noise_seeds=a.noise_seeds, max_runs=a.max_runs, push=not a.no_push)
+    best = climb(base, Path(a.labels), seeds=tuple(range(a.seeds)), max_runs=a.max_runs, push=not a.no_push)
     print(json.dumps({"incumbent": best.name}))
     return 0
 
@@ -264,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     cl = sub.add_parser("climb", help="hillclimb training/data settings on val with a noise floor")
     cl.add_argument("--labels", default=str(DATA / "labels"))
     cl.add_argument("--set", nargs="*", default=[])
-    cl.add_argument("--noise-seeds", type=int, default=3)
+    cl.add_argument("--seeds", type=int, default=2, help="seeds per config; scores are seed-averaged")
     cl.add_argument("--max-runs", type=int, default=60)
     cl.add_argument("--no-push", action="store_true")
     cl.add_argument("--from-incumbent", action="store_true", help="start from runs/climb/incumbent.json")
