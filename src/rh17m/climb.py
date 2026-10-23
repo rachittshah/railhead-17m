@@ -34,28 +34,29 @@ CONTROL = {"_control": True}  # A/A: the incumbent config retrained now; any "ga
 
 
 def coarse_moves() -> list[dict]:
+    """Most promising first (a pass may be cut short): distillation, regularisation, input features, then the
+    optimiser settings that have been neutral in every pass so far."""
     return [
         CONTROL,
-        {"data": {"tau": 0.02}}, {"data": {"tau": 0.1}}, {"data": {"tau": 0.2}},
-        {"lr": 3e-5}, {"lr": 3e-4},
-        {"head_lr": 1e-4}, {"head_lr": 2e-3},
-        {"epochs": 4}, {"epochs": 16},
-        {"batch_size": 8}, {"batch_size": 32},
-        {"data": {"features": False}}, {"data": {"drop_candidate_table": False}}, {"data": {"ranks": True}}, {"data": {"plane": True}},
-        {"shuffle_options": False}, {"layouts": ["instruction_state"]},
-        {"weight_decay": 0.0}, {"weight_decay": 0.1},
-        {"train_splits": ["train", "ood"]},
-        {"data": {"scale": 1_000_000.0}}, {"data": {"scale": 20_000.0}},
-        {"data": {"min_spread": 0.05}}, {"data": {"min_spread": 0.1}},
-        # Regularisation for small data: keep the lower encoder pretrained.
+        # Distillation over unlabelled train-map states: from the incumbent's seed ensemble, from the latest
+        # Bekko-68M teacher (runs/teachers/current, retrained each pass), and from the incumbent itself.
+        {"distill_from": "@ensemble", "distill_max": 3000}, {"distill_from": "@ensemble", "distill_max": 1000},
+        {"distill_from": "@teacher", "distill_max": 4000}, {"distill_from": "@teacher", "distill_max": 1000},
+        {"distill_from": "@incumbent", "distill_max": 1000},
+        # Regularisation for small data, and the epoch-selection metric.
         {"freeze_embeddings": True}, {"freeze_embeddings": True, "freeze_layers": 3}, {"freeze_layers": -1},
         {"select_metric": "play_regret"}, {"select_metric": "nll"},
-        # Distillation over unlabelled train-map states: from the incumbent itself, and from the latest larger
-        # teacher (runs/teachers/current, e.g. Bekko-68M trained on the same labels) when one exists.
-        {"distill_from": "@incumbent", "distill_max": 1000},
-        {"distill_from": "@ensemble", "distill_max": 1000}, {"distill_from": "@ensemble", "distill_max": 3000},
-        {"distill_from": "@teacher", "distill_max": 1000},
-        {"distill_from": "@teacher", "distill_max": 4000},
+        # What the model reads.
+        {"data": {"ranks": True}}, {"data": {"plane": True}}, {"data": {"features": False}},
+        {"data": {"drop_candidate_table": False}}, {"data": {"expansions": False}},
+        {"data": {"min_spread": 0.05}}, {"data": {"min_spread": 0.1}},
+        {"data": {"scale": 1_000_000.0}}, {"data": {"scale": 20_000.0}},
+        # Optimiser and targets.
+        {"data": {"tau": 0.02}}, {"data": {"tau": 0.1}}, {"data": {"tau": 0.2}},
+        {"lr": 3e-5}, {"lr": 3e-4}, {"head_lr": 1e-4}, {"head_lr": 2e-3},
+        {"epochs": 4}, {"epochs": 16}, {"batch_size": 8}, {"batch_size": 32},
+        {"shuffle_options": False}, {"layouts": ["instruction_state"]},
+        {"weight_decay": 0.0}, {"weight_decay": 0.1}, {"train_splits": ["train", "ood"]},
     ]
 
 
