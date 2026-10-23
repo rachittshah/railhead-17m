@@ -43,7 +43,7 @@ def measure(task_dir: Path, log: Path | None = None, days: int = 365, forks: int
                 child, s = _timed(lambda i=i: world.fork(tmp / f"fork{i}", reseed=1000 + i))
                 fork_s.append(s)
                 try:
-                    _, s = _timed(lambda: child.step(days=days))
+                    _, s = _timed(lambda child=child: child.step(days=days))
                     step_s.append(s)
                 finally:
                     child.close()

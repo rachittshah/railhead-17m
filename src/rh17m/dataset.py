@@ -38,6 +38,8 @@ class DatasetConfig:
 def map_split(task_id: str) -> str:
     if "-dev-" in task_id:
         return "test"
+    if "-ood-" in task_id:
+        return "ood"
     return "val" if task_id in VAL_MAPS else "train"
 
 

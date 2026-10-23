@@ -29,7 +29,7 @@ from railhead.bridge import BridgeError
 from railhead.task import TaskSpec
 from railhead.world import World
 
-from rh17m.states import TASKS_ROOT, list_states, load_meta
+from rh17m.states import find_task, list_states, load_meta
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +43,29 @@ class LabelConfig:
     chunks: int = 8  # 728 days: about two years, long enough for an air route to pay back
     max_air: int = 8
     planes: int = 2
-    version: str = "lbl-v1"
+    version: str = "lbl-v2"
+
+
+# How a chosen route is built: the first configuration the company can pay for. A large airport with two
+# fast planes is the routes-v1 estimate; poorer companies get the cheaper airports (small before 1960-ish,
+# commuter later; these exclude big planes) and then a single plane, as a player short of cash would build.
+# Only a refusal that spent nothing (no cash, or a type not available this year) moves down the ladder.
+BUILD_LADDER: tuple[tuple[str, int], ...] = (
+    ("auto", 2), ("small", 2), ("commuter", 2), ("auto", 1), ("small", 1), ("commuter", 1))
+_NEXT_RUNG = ("ERR_NOT_ENOUGH_CASH", "ERR_TYPE_NOT_AVAILABLE")
+
+
+def build_affordable(world: World, a_town: int, b_town: int, ladder=BUILD_LADDER):
+    """Try each (airport type, planes) on the ladder until one is not refused for cash or availability.
+    Returns the last BuildResult and the configuration used."""
+    from rhs1.builders.air import AirPlan, build_air_route
+
+    br, cfg = None, ladder[0]
+    for cfg in ladder:
+        br = build_air_route(world, AirPlan(a_town, b_town, cfg[0], cfg[1], -1))
+        if br.ok or br.cost or br.steps or not (br.failed_step or "").endswith(_NEXT_RUNG):
+            break
+    return br, cfg
 
 
 def querier_for(world: World, task: TaskSpec, end_date: int):
@@ -79,15 +101,13 @@ def _rollout(save: Path, workdir: Path, seed: int, cfg: LabelConfig) -> dict:
         world.close()
 
 
-def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig(),
-                tasks_root: Path = TASKS_ROOT) -> dict:
+def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig()) -> dict:
     """Label one state (see the module docstring). Returns the record; does not write it."""
-    from rhs1.builders.air import AirPlan, build_air_route
     from rhs1.candidates import enumerate_routes
     from rhs1.snapshot import aggregate_routes, render_state, take_snapshot
 
     meta = load_meta(root, state_id)
-    task = TaskSpec.load(tasks_root / meta.task_id)
+    task = TaskSpec.load(find_task(meta.task_id))
     t0 = time.perf_counter()
     seeds = rollout_seeds(state_id, cfg.seeds)
     with tempfile.TemporaryDirectory(prefix="rh17m-label-") as tmp:
@@ -108,9 +128,10 @@ def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig(),
                 child = parent.fork(tmp / f"build{i}")
                 try:
                     try:
-                        br = build_air_route(child, AirPlan(c.a["id"], c.b["id"], "auto", cfg.planes, -1))
+                        br, used = build_affordable(child, c.a["id"], c.b["id"])
                         builds[c.candidate_id] = {"ok": br.ok, "cost": br.cost, "failed_step": br.failed_step,
-                                                  "airport_type": br.airport_type}
+                                                  "airport_type": br.airport_type, "planes": used[1],
+                                                  "ladder": list(used)}
                         untouched = not br.ok and not br.cost and not br.steps
                     except BridgeError as e:
                         builds[c.candidate_id] = {"ok": False, "cost": None, "failed_step": f"raise:{e.code}"}
@@ -155,7 +176,7 @@ def _job(args: tuple) -> dict:
         rec = label_state(Path(root), state_id, cfg)
         _write_atomic(dest, rec)
         return {"state_id": state_id, "ok": True, "s": rec["timing"]["total_s"], "options": len(rec["options"])}
-    except Exception as e:  # one bad state must not stop the run; the error file lets a rerun retry it
+    except Exception as e:  # noqa: BLE001 - one bad state must not stop the run; the error file lets a rerun retry it
         _write_atomic(Path(out_dir) / f"{state_id}.error.json",
                       {"state_id": state_id, "error": repr(e), "trace": traceback.format_exc()[-4000:]})
         return {"state_id": state_id, "ok": False, "error": repr(e)}

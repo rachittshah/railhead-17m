@@ -33,5 +33,5 @@ def test_longest_affordable_skips_unaffordable_routes():
 
 
 def test_bootstrap_diff_detects_a_consistent_gain():
-    mean, lo, hi = bootstrap_diff([1.0] * 50, [0.0] * 50)
+    mean, lo, _ = bootstrap_diff([1.0] * 50, [0.0] * 50)
     assert mean == pytest.approx(1.0) and lo > 0.9

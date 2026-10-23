@@ -34,7 +34,17 @@ SEED_GAME_ROOTS = (
     Path.home() / "railhead-system1" / "runs" / "seed-games",
     Path.home() / "railhead-system1" / "runs" / "seed-games-opus",
 )
-TASKS_ROOT = Path.home() / "railhead" / "tasks"
+TASKS_ROOT = Path.home() / "railhead" / "tasks"  # the local checkout: the 512x512 10-year arena maps live here
+HUB_TASKS_ROOT = Path(__file__).resolve().parents[2] / "data" / "tasks"  # tasks fetched by ``rh17m tasks``
+TASK_ROOTS = (HUB_TASKS_ROOT, TASKS_ROOT)
+
+
+def find_task(task_id: str) -> Path:
+    """The directory of ``task_id`` (task.json + start.sav), Hub copies first, then the local checkout."""
+    for root in TASK_ROOTS:
+        if (root / task_id / "start.sav").exists():
+            return root / task_id
+    raise FileNotFoundError(f"task {task_id} is in none of {TASK_ROOTS}; fetch it with `rh17m tasks`")
 
 
 @dataclass(frozen=True)
@@ -52,7 +62,10 @@ class StateMeta:
 
 
 def split_of(task_id: str) -> str:
-    return "train" if "-train-" in task_id else "dev" if "-dev-" in task_id else "other"
+    for split in ("train", "dev", "ood"):
+        if f"-{split}-" in task_id:
+            return split
+    return "other"
 
 
 def _kpis(world: World) -> tuple[dict, int, int]:
@@ -95,15 +108,19 @@ def seed_games(roots: tuple[Path, ...] = SEED_GAME_ROOTS) -> Iterator[tuple[str,
 
 
 def harvest_teacher(task_id: str, model: str, log_path: Path, root: Path,
-                    tasks_root: Path = TASKS_ROOT) -> list[StateMeta]:
-    """Replay one teacher game and save a state after each wait. Skips the game if its states exist."""
-    task_dir = tasks_root / task_id
+                    end_date: int | None = None) -> list[StateMeta]:
+    """Replay one teacher game and save a state after each wait. Skips the game once it is marked done.
+    ``end_date`` defaults to the run's meta.json beside the log."""
+    task_dir = find_task(task_id)
     task = TaskSpec.load(task_dir)
-    meta_run = json.loads((log_path.parent / "meta.json").read_text())
-    end_date = int(meta_run["end_date"])
+    if end_date is None:
+        end_date = int(json.loads((log_path.parent / "meta.json").read_text())["end_date"])
     prefix = f"{task_id}.teacher-{model}"
-    if any(Path(root).glob(f"{prefix}.w*.json")):
+    marker = Path(root) / f".{prefix}.done"
+    if marker.exists():
         return [load_meta(root, p.stem) for p in sorted(Path(root).glob(f"{prefix}.w*.json"))]
+    for stale in Path(root).glob(f"{prefix}.w*"):  # an interrupted harvest restarts from the beginning
+        stale.unlink()
     out: list[StateMeta] = []
 
     def on_wait(world: World, record: dict) -> None:
@@ -116,12 +133,13 @@ def harvest_teacher(task_id: str, model: str, log_path: Path, root: Path,
     if not res.valid:
         log.warning("teacher game %s/%s diverged after %d states: %s", task_id, model, len(out),
                     res.divergences[:1])
+    marker.write_text(json.dumps({"states": len(out), "valid": res.valid}))
     return out
 
 
 # ---------------------------------------------------------------------- self-play
 def selfplay(task_id: str, root: Path, seed: int, policy: str = "mix", max_states: int = 30,
-             p_build: float = 0.6, tasks_root: Path = TASKS_ROOT) -> list[StateMeta]:
+             p_build: float = 0.6) -> list[StateMeta]:
     """Play a scripted company and save a state at every wake-up.
 
     ``policy``: ``random`` builds a uniformly random air candidate, ``longest`` the longest-band one,
@@ -133,13 +151,15 @@ def selfplay(task_id: str, root: Path, seed: int, policy: str = "mix", max_state
 
     from rh17m.labels import querier_for
 
-    task_dir = tasks_root / task_id
+    task_dir = find_task(task_id)
     task = TaskSpec.load(task_dir)
     rng = random.Random(seed)
     prefix = f"{task_id}.selfplay-{policy}-s{seed}"
-    done = sorted(Path(root).glob(f"{prefix}.w*.json"))
-    if done:
-        return [load_meta(root, p.stem) for p in done]
+    marker = Path(root) / f".{prefix}.done"
+    if marker.exists():
+        return [load_meta(root, p.stem) for p in sorted(Path(root).glob(f"{prefix}.w*.json"))]
+    for stale in Path(root).glob(f"{prefix}.w*"):  # an interrupted game is replayed from its seed
+        stale.unlink()
     out: list[StateMeta] = []
     with tempfile.TemporaryDirectory(prefix="rh17m-selfplay-") as tmp:
         world = World.load(Path(tmp) / "w", task_dir / "start.sav")
@@ -165,6 +185,7 @@ def selfplay(task_id: str, root: Path, seed: int, policy: str = "mix", max_state
                 world.step(days=rng.choice((30, 60, 90, 180, 365)))
         finally:
             world.close()
+    marker.write_text(json.dumps({"states": len(out)}))
     return out
 
 
@@ -173,7 +194,7 @@ def _selfplay_job(args: tuple) -> dict:
     try:
         got = selfplay(task_id, Path(root), seed, policy=policy, max_states=max_states)
         return {"task": task_id, "seed": seed, "policy": policy, "states": len(got)}
-    except Exception as e:  # a crashed game loses its own states only
+    except Exception as e:  # noqa: BLE001 - a crashed game loses its own states only
         return {"task": task_id, "seed": seed, "policy": policy, "error": repr(e)}
 
 
@@ -187,8 +208,8 @@ def selfplay_many(task_ids: list[str], root: Path, seeds: list[int], policies: l
         yield from pool.imap_unordered(_selfplay_job, jobs)
 
 
-def start_state(task_id: str, root: Path, tasks_root: Path = TASKS_ROOT) -> StateMeta:
-    task_dir = tasks_root / task_id
+def start_state(task_id: str, root: Path) -> StateMeta:
+    task_dir = find_task(task_id)
     task = TaskSpec.load(task_dir)
     sid = f"{task_id}.start"
     if (Path(root) / f"{sid}.json").exists():
