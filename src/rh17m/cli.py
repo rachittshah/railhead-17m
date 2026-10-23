@@ -168,6 +168,19 @@ def _watch(a: argparse.Namespace) -> int:
         time.sleep(a.interval)
 
 
+def _observe(a: argparse.Namespace) -> int:
+    from rh17m.observe import observe_all
+
+    ok = bad = 0
+    for r in observe_all(Path(a.root), Path(a.out), workers=a.workers):
+        ok += bool(r.get("ok"))
+        bad += r.get("ok") is False
+        if r.get("ok") is False:
+            print(json.dumps(r), flush=True)
+    print(json.dumps({"observed": ok, "failed": bad}))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(prog="rh17m")
@@ -239,6 +252,12 @@ def main(argv: list[str] | None = None) -> int:
     pb.add_argument("--card", default="")
     pb.add_argument("--labels", default=str(DATA / "labels"))
     pb.set_defaults(fn=_publish)
+
+    ob = sub.add_parser("observe", help="render every state's observation (no rollouts) for distillation")
+    ob.add_argument("--root", default=str(DATA / "states"))
+    ob.add_argument("--out", default=str(DATA / "obs"))
+    ob.add_argument("--workers", type=int, default=4)
+    ob.set_defaults(fn=_observe)
 
     wt = sub.add_parser("watch", help="stream data-pipeline growth to Trackio")
     wt.add_argument("--labels", default=str(DATA / "labels"))
