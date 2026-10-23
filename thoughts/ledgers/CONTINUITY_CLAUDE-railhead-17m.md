@@ -66,7 +66,13 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   - [→] Expansion options (lbl-v3, src/rh17m/expand.py): add 2 (or 1) planes to the 3 most profitable air
         routes; labels/play/self-play/observe all execute options via expand.apply_option (player play-v3).
         NOT yet verified end to end; label test running (b794wy2pt); labellers still on code loaded before v3
-- Now: [→] climb pass 4 (15:40, 627 ex, 113 val, 3 seeds, exp_regret); labellers train x11, val x8, test x3
+  - [x] Expansions verified on a real state (3 options, +2 planes, values between routes and hold); lbl-v3
+        labelling live; first 101 v3 states: an expansion is the best option in 26
+  - [x] Training ~2x faster: cached tokenisation (5.5 ms/ex -> 0), early stopping (patience 3)
+  - [x] Ensemble distillation (@ensemble = incumbent's seed models); obs-v3 (with expansions) regenerating
+  - [x] Keep rule: noise = max(seed sample-std floor, |A/A control diff|) (pass 5 control +0.0050 > floor 0.0025)
+  - Closed loop under play-v3: baselines re-running (runs/play/baselines-v3); v1/v2 games archived
+- Now: [→] climb pass 6 (16:27, 745 ex, 128 val, 3 seeds, exp_regret); labellers train x11, val x8, test x3
 - Open: UNCONFIRMED flaky unit test (1 failure once under heavy load, not reproduced in 4 runs)
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
 - Remaining:
