@@ -130,3 +130,28 @@ def tournament(task_ids: list[str], policies: list[str], seeds: list[int], out_d
     jobs = [(t, p, s, wake_days, str(out_dir), model_dir) for s in seeds for t in task_ids for p in policies]
     with mp.get_context("spawn").Pool(workers) as pool:
         yield from pool.imap_unordered(_job, jobs)
+
+
+def report(play_root: Path) -> dict:
+    """Mean arena score and net worth per policy over the tasks every policy has played (paired), from all
+    run folders under ``play_root``."""
+    import statistics
+
+    games: dict[str, dict[str, list[dict]]] = {}
+    for f in Path(play_root).glob("*/*.json"):
+        if f.name == "summary.json":
+            continue
+        r = json.loads(f.read_text())
+        label = r["policy"] if r["policy"] != "model" else f"model:{f.parent.name}"
+        games.setdefault(label, {}).setdefault(r["task"], []).append(r)
+    if not games:
+        return {}
+    shared = set.intersection(*(set(v) for v in games.values()))
+    out = {"tasks": sorted(shared), "policies": {}}
+    for label, by_task in games.items():
+        scores = [statistics.mean(g["score"] for g in by_task[t]) for t in sorted(shared)]
+        nws = [statistics.mean(g["final_nw"] for g in by_task[t]) for t in sorted(shared)]
+        out["policies"][label] = {"mean_score": round(statistics.mean(scores), 4) if scores else None,
+                                  "median_nw": round(statistics.median(nws)) if nws else None,
+                                  "games": sum(len(by_task[t]) for t in shared)}
+    return out

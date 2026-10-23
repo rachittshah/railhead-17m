@@ -25,7 +25,13 @@ while [[ ! -f data/labels/.stop ]]; do
     fi
     inc=$(.venv/bin/python -I -c "import json; print(json.load(open('runs/climb/incumbent.json'))['model_dir'])" 2>/dev/null)
     if [[ -n "$inc" ]]; then
-      $R publish model --run "${inc:h}" >> data/logs/publish.log 2>&1 || echo "$(date +%H:%M) publish skipped (hf auth?)" >> data/logs/climb_loop.log
+      run="${inc:h}"
+      # Closed loop on the held-out dev maps, paired with the scripted baselines in runs/play/baselines-w180.
+      nice -n 5 $R play --tasks $(ls ~/railhead/tasks | grep -E '^arena-dev-02' | tr '\n' ' ') --policies model \
+        --model "$inc" --seeds 1 --wake-days 180 --workers 2 --out "runs/play/${run:t}" >> data/logs/play-model.log 2>&1
+      $R play-report >> data/logs/climb_loop.log 2>&1
+      git add runs/play/summary.json && git commit -q -m "Closed loop: ${run:t} on the dev maps" && git push -q
+      $R publish model --run "$run" >> data/logs/publish.log 2>&1 || echo "$(date +%H:%M) publish skipped (hf auth?)" >> data/logs/climb_loop.log
     fi
     last=$n
   fi

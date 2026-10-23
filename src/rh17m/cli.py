@@ -181,6 +181,15 @@ def _observe(a: argparse.Namespace) -> int:
     return 0
 
 
+def _play_report(a: argparse.Namespace) -> int:
+    from rh17m.play import report
+
+    out = report(Path(a.root))
+    print(json.dumps(out, indent=1))
+    Path(a.root, "summary.json").write_text(json.dumps(out, indent=1))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(prog="rh17m")
@@ -264,6 +273,10 @@ def main(argv: list[str] | None = None) -> int:
     wt.add_argument("--states", default=str(DATA / "states"))
     wt.add_argument("--interval", type=int, default=120)
     wt.set_defaults(fn=_watch)
+
+    pr = sub.add_parser("play-report", help="paired closed-loop summary of every policy under runs/play")
+    pr.add_argument("--root", default=str(Path(__file__).resolve().parents[2] / "runs" / "play"))
+    pr.set_defaults(fn=_play_report)
 
     b = sub.add_parser("bench", help="simulator throughput")
     b.add_argument("rest", nargs=argparse.REMAINDER)
