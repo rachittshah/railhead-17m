@@ -18,7 +18,7 @@ while [[ ! -f data/labels/.stop ]]; do
   read n val <<< "$(count)"
   if (( val >= MIN_VAL )) && (( n >= last * GROWTH )); then
     echo "$(date +%H:%M) climb pass on $n examples ($val val)" | tee -a data/logs/climb_loop.log
-    # A fresh Bekko-68M teacher on today's labels, with the incumbent's settings, for the @teacher moves.
+    # A fresh Bekko-68M teacher on the current labels (default settings), for the @teacher moves.
     tname="teacher-68m-$(date +%m%d-%H%M)"
     $R train --name "$tname" --set init='"bekko-68m"' group='"teachers"' >> data/logs/teacher.log 2>&1 \
       && ln -sfn "../train/$tname/model" runs/teachers/current \
