@@ -1,0 +1,37 @@
+{
+ "config": {
+  "name": "1023-1209-base-s2",
+  "data": {},
+  "init": "bekko",
+  "epochs": 8,
+  "batch_size": 16,
+  "lr": 0.0001,
+  "head_lr": 0.0005,
+  "weight_decay": 0.01,
+  "warmup_frac": 0.1,
+  "shuffle_options": true,
+  "layouts": [
+   "instruction_state",
+   "state_instruction"
+  ],
+  "seed": 2,
+  "pad_multiple": 64,
+  "compile": true,
+  "bf16": true,
+  "track": true,
+  "group": "climb-1023-1209",
+  "log_every": 5,
+  "train_splits": [
+   "train"
+  ],
+  "max_train": 0,
+  "distill_from": "",
+  "distill_max": 0,
+  "distill_temperature": 1.0
+ },
+ "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-1209-base-s2/model",
+ "val": {
+  "exp_regret": 0.3154729179149339
+ },
+ "saved": "2026-10-23 12:10:45"
+}
