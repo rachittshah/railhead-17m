@@ -27,8 +27,12 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   - [x] Repo + private GitHub remote
   - [x] Sim bench: fork 0.7 s, 365-day step 1.0 s fresh / 1.8 s at 148 vehicles
   - [x] states.py (teacher, start, self-play, Hub), labels.py (lbl-v2), dataset.py, evaluate.py, hub.py
-  - [x] Data pipeline running in tmux `rh17m-data` (window 0: local harvest + label loop; window 1: Hub)
-- Now: [→] MLX Bekko port (sub-agent), training loop, first baseline table
+  - [x] Data pipeline running in tmux `rh17m-data` (window 0: local harvest + label loop; window 1: Hub;
+        label2: second labeller, order seed 1; watch: data metrics; trackio: dashboard :7860)
+  - [x] MLX Bekko-17M port: parity 1.9e-6 vs PyTorch runtime, 5.4 ms/decision, 116 ex/s compiled bf16
+  - [x] train.py (Trackio-tracked), climb.py (noise floor + paired bootstrap), play.py, hub publish
+  - [x] Labels lbl-v2.2: NO_SITE ladder step, no-build states skip rollouts, rollouts stop at game end
+- Now: [→] accumulate labels (val needs ≥40 examples), then first real run + climb
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
 - Remaining:
   - [ ] Closed-loop player (17M picks routes in full games) + paired eval on dev maps
