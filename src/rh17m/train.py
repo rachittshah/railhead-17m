@@ -57,12 +57,31 @@ class TrainConfig:
     freeze_embeddings: bool = False  # keep the token embeddings at their pretrained values
     freeze_layers: int = 0  # freeze the first N encoder layers (-1: the whole encoder, train the heads only)
     select_metric: str = "exp_regret"  # val metric that picks the epoch (exp_regret | play_regret | regret | nll)
+    patience: int = 3  # stop after this many epochs without a better val select_metric (0: run every epoch)
+
+
+# Tokenisation is the CPU cost of training (the labellers keep every core busy), and an example's prefix and
+# option branches do not depend on the option order: each is encoded once per layout, and shuffling reorders
+# the cached branches (equal to re-encoding the shuffled options; checked on 60 encodings).
+_ENC_CACHE: dict[tuple, B.EncodedDecision] = {}
+
+
+def _encoded(tok, ex: dict, layout: str) -> B.EncodedDecision:
+    key = (id(tok), ex["id"], layout, hash(ex["state_json"]), hash(tuple(ex["options"])))
+    enc = _ENC_CACHE.get(key)
+    if enc is None:
+        enc = _ENC_CACHE[key] = B.encode_choice(tok, ex["state_json"], ex["instructions"], ex["options"],
+                                                layout=layout)
+    return enc
 
 
 def _encode(tok, ex: dict, layout: str, perm: list[int] | None = None) -> B.EncodedDecision:
-    opts = ex["options"] if perm is None else [ex["options"][i] for i in perm]
-    enc = B.encode_choice(tok, ex["state_json"], ex["instructions"], opts, layout=layout)
-    return enc.with_target([ex["target"][k] for k, _ in opts])
+    from dataclasses import replace
+
+    enc = _encoded(tok, ex, layout)
+    if perm is not None:
+        enc = replace(enc, keys=tuple(enc.keys[i] for i in perm), option_ids=tuple(enc.option_ids[i] for i in perm))
+    return enc.with_target([ex["target"][k] for k in enc.keys])
 
 
 def predict(model, examples: list[dict], temperature: float = 1.0, batch_size: int = 32,
@@ -70,8 +89,7 @@ def predict(model, examples: list[dict], temperature: float = 1.0, batch_size: i
     tok = model.tokenizer
     out: list[dict[str, float]] = []
     for i in range(0, len(examples), batch_size):
-        enc = [B.encode_choice(tok, e["state_json"], e["instructions"], e["options"], layout=layout)
-               for e in examples[i:i + batch_size]]
+        enc = [_encoded(tok, e, layout) for e in examples[i:i + batch_size]]
         out.extend(B.decision_probs(model, enc, pad_multiple=64))
     return [temper(p, temperature) for p in out]
 
@@ -250,6 +268,8 @@ def _run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
         hist.flush()
         tracker.log({"train/epoch_loss": row["loss"],
                      **{f"val/{k[4:]}": v for k, v in row.items() if k.startswith("val_")}}, gstep)
+        if cfg.patience and val and epoch - best["epoch"] >= cfg.patience:
+            break  # early stop: the selected epoch is already behind us
     hist.close()
     if best_params is not None:
         model.load_weights(list(best_params.items()))
