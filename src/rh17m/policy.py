@@ -24,13 +24,22 @@ class ModelPolicy:
         from rh17m.train import limit_mlx_cache
 
         limit_mlx_cache()
-        self.model_dir = Path(model_dir)
-        self.model = B.load(str(model_dir), revision=None)
-        meta = Path(model_dir) / "rh17m.json"
-        self.temperature = json.loads(meta.read_text())["temperature"] if meta.exists() else 1.0
+        # A comma-separated model_dir is an ensemble (e.g. a config's seed models): probabilities are averaged.
+        dirs = [Path(d) for d in str(model_dir).split(",") if d]
+        self.model_dir = dirs[0]
+        self.members = []
+        for d in dirs:
+            meta = d / "rh17m.json"
+            t = json.loads(meta.read_text())["temperature"] if meta.exists() else 1.0
+            self.members.append((B.load(str(d), revision=None), t))
+        self.model, self.temperature = self.members[0]
         self.layout = layout
 
     def __call__(self, obs: dict) -> dict[str, float]:
-        p = B.choice_probs(self.model, None, obs["state_json"], obs["instructions"], obs["options"],
-                           layout=self.layout)
-        return temper(p, self.temperature)
+        avg: dict[str, float] = {}
+        for model, t in self.members:
+            p = temper(B.choice_probs(model, None, obs["state_json"], obs["instructions"], obs["options"],
+                                      layout=self.layout), t)
+            for k, v in p.items():
+                avg[k] = avg.get(k, 0.0) + v / len(self.members)
+        return avg
