@@ -77,6 +77,24 @@ def _git_push(message: str, paths: list[Path]) -> None:
     subprocess.run(["git", "push", "-q"], cwd=ROOT, check=False)
 
 
+INCUMBENT = CLIMB_DIR / "incumbent.json"
+
+
+def load_incumbent() -> TrainConfig | None:
+    if not INCUMBENT.exists():
+        return None
+    d = json.loads(INCUMBENT.read_text())["config"]
+    cfg = TrainConfig()
+    for k, v in d.items():
+        setattr(cfg, k, tuple(v) if isinstance(getattr(cfg, k, None), tuple) else v)
+    return cfg
+
+
+def save_incumbent(cfg: TrainConfig, model_dir: Path, val: dict) -> None:
+    INCUMBENT.write_text(json.dumps({"config": asdict(cfg), "model_dir": str(model_dir), "val": val,
+                                     "saved": time.strftime("%Y-%m-%d %H:%M:%S")}, indent=1))
+
+
 def climb(base: TrainConfig, labels_dir: Path, noise_seeds: int = 3, max_runs: int = 60,
           push: bool = True, on_keep=None) -> TrainConfig:
     CLIMB_DIR.mkdir(parents=True, exist_ok=True)
@@ -107,6 +125,7 @@ def climb(base: TrainConfig, labels_dir: Path, noise_seeds: int = 3, max_runs: i
             inc_cfg, inc_dir = cfg, d
     noise = max(seeds_val) - min(seeds_val)
     log({"kind": "noise_floor", "exp_regret_by_seed": seeds_val, "noise": noise})
+    save_incumbent(inc_cfg, inc_dir, {"exp_regret": min(seeds_val)})
     runs = noise_seeds
     for phase, moves in (("coarse", coarse_moves()), ("fine", None)):
         moves = moves if moves is not None else fine_moves(inc_cfg)
@@ -131,13 +150,14 @@ def climb(base: TrainConfig, labels_dir: Path, noise_seeds: int = 3, max_runs: i
                  "diff_exp_regret": diff, "ci": [lo, hi], "noise": noise, "kept": keep, "n_val": len(val)})
             if keep:
                 inc_cfg, inc_dir = cfg, cand_dir
+                save_incumbent(inc_cfg, inc_dir, ma)
                 if on_keep:
                     on_keep(cfg, cand_dir, ma)
                 if push:
                     _git_push(f"Climb: keep {json.dumps(move)} (val exp_regret {ma['exp_regret']:.4f}, "
                               f"diff {diff:+.4f} [{lo:+.4f}, {hi:+.4f}])",
-                              [ledger, ROOT / "runs" / "train" / cfg.name / "results.json",
+                              [ledger, INCUMBENT, ROOT / "runs" / "train" / cfg.name / "results.json",
                                ROOT / "runs" / "train" / cfg.name / "config.json"])
     if push:
-        _git_push("Climb: ledger after a full pass", [ledger])
+        _git_push("Climb: ledger after a full pass", [ledger, INCUMBENT])
     return inc_cfg

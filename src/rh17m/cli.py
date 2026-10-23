@@ -108,7 +108,9 @@ def _climb(a: argparse.Namespace) -> int:
     from rh17m.climb import climb
     from rh17m.train import TrainConfig
 
-    base = TrainConfig(name="base")
+    from rh17m.climb import load_incumbent
+
+    base = (load_incumbent() if a.from_incumbent else None) or TrainConfig(name="base")
     for kv in a.set:
         k, v = kv.split("=", 1)
         if k.startswith("data."):
@@ -210,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     cl.add_argument("--noise-seeds", type=int, default=3)
     cl.add_argument("--max-runs", type=int, default=60)
     cl.add_argument("--no-push", action="store_true")
+    cl.add_argument("--from-incumbent", action="store_true", help="start from runs/climb/incumbent.json")
     cl.set_defaults(fn=_climb)
 
     pl = sub.add_parser("play", help="closed-loop games: policies x tasks x seeds")
