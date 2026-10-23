@@ -107,11 +107,14 @@ TRACK_PROJECT = "railhead-17m"
 def _tracker(cfg: TrainConfig, extra: dict):
     """The MLX infra's Trackio tracker (decision_mlx.tracking, decision-mlx PR #7)."""
     try:
-        from decision_mlx.tracking import Tracker
-    except ImportError:  # the local decision-mlx checkout predates PR #7
+        from decision_mlx.tracking import (
+            Tracker,
+            system_metrics,  # noqa: F401 - PR #8, the system sampler
+        )
+    except ImportError:  # the local decision-mlx checkout predates PRs #7/#8
         from rh17m._tracking import Tracker
     return Tracker(TRACK_PROJECT, name=cfg.name, group=cfg.group or None, config={**asdict(cfg), **extra},
-                   enabled=cfg.track, auto_log_gpu=True)
+                   enabled=cfg.track, system_interval=2.0)
 
 
 def _lr(opt, index: int) -> float:

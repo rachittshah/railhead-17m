@@ -144,13 +144,16 @@ def _watch(a: argparse.Namespace) -> int:
     import time
 
     try:
-        from decision_mlx.tracking import Tracker
-    except ImportError:  # the local decision-mlx checkout predates PR #7
+        from decision_mlx.tracking import (
+            Tracker,
+            system_metrics,  # noqa: F401 - PR #8, the system sampler
+        )
+    except ImportError:  # the local decision-mlx checkout predates PRs #7/#8
         from rh17m._tracking import Tracker
 
     from rh17m.dataset import DatasetConfig, load_examples
 
-    tracker = Tracker("railhead-17m-data", name=time.strftime("pipeline-%m%d-%H%M"), auto_log_cpu=True)
+    tracker = Tracker("railhead-17m-data", name=time.strftime("pipeline-%m%d-%H%M"), system_interval=10.0)
     labels, states = Path(a.labels), Path(a.states)
     step, prev, t_prev = 0, None, time.time()
     while True:
