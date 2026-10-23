@@ -43,8 +43,15 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   - [x] Closed-loop baselines, 11 dev maps, wake 180 d: random 0.689, longest 0.490, longest_affordable
         0.099, hold 0.000 (runs/play/summary.json)
   - [x] Harvest complete: 5,119 states, all observed (data/obs) for distillation
-- Now: [→] climb loop (tmux rh17m:climb) runs a pass each time examples grow 25% (val ≥ 40 reached 12:00);
-  labellers: train x10, val x8, test+ood x4 (CPU saturated, ~240 labels/h)
+  - [x] decision-mlx PR #10 merged: Tracker tables/histograms/images/reports/traces/alerts/files/artifacts;
+        rh17m fills every Trackio tab (train, climb project railhead-17m-climb, play project railhead-17m-play)
+  - [x] Climb pass 1 (238 ex, 59 val): noise floor 0.011, 0 of 23 moves kept -> data-bound
+  - [x] Teacher: Bekko-68M on same labels (val exp_regret 0.303 vs 17M ~0.31), runs/teachers/current
+  - [x] Labels lbl-v2.4: train states 1 seed (CRN), eval splits 3; labellers train x14, val x5, test+ood x3
+  - [x] DAgger: model self-play policy (epsilon 0.2); climb loop runs it after each pass; labelled first
+  - Incumbent 1023-1209-base-s2 on arena-dev-0003: £4.69M (0.892) vs longest £4.09M (0.858)
+- Now: [→] climb loop waits for 25% more examples (last_n in runs/climb/last_n); postpass window: closed
+  loop of the incumbent on 11 dev maps, tracked play report, DAgger self-play
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
 - Remaining:
   - [ ] Closed-loop player (17M picks routes in full games) + paired eval on dev maps
