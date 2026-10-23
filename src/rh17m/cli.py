@@ -124,7 +124,9 @@ def _publish(a: argparse.Namespace) -> int:
     from rh17m.hub import publish_decisions, publish_model
 
     if a.what == "model":
-        card = Path(a.card).read_text() if a.card else None
+        from rh17m.card import card as make_card
+
+        card = Path(a.card).read_text() if a.card else make_card(Path(a.run))
         print(publish_model(Path(a.run), card=card))
     else:
         print(publish_decisions(Path(a.labels)))
