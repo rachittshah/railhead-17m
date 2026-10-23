@@ -86,7 +86,9 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
         1023-1627-base-s1. 3-seed ensemble of 1627 also worse on 11 local maps (0.650 vs 0.735; noisy)
   - [x] Closed-loop gate in climb loop (rh17m gate, runs/climb/gates.jsonl); climb judges on lbl-v4 val;
         label-generation moves first, distillation last
-  - [→] Diagnostic: pass-7 undistilled base (1023-1713-base-s2) on devhub (window devhub-b7): data vs distill
+  - [x] Diagnostic (26 devhub maps): pass-7 base (no distill) vs incumbent-1627 -0.123 [-0.406,+0.179] (data
+        change n.s.); self-distill vs pass-7 base -0.282 [-0.634,+0.037]; ens-distill vs base -0.317
+        [-0.667,+0.002] -> DISTILLATION ITSELF HURTS closed loop despite val gains. Moves now last + gated.
 - Now: [→] climb pass 8 (21:02, 1233 ex, 222 val) with teacher retrain, v4-val judging, closed-loop gate
 - Next: if v4-only training wins offline AND in the gate, the label generation question is settled
 - Open: UNCONFIRMED flaky unit test (1 failure once under heavy load, not reproduced in 4 runs)
