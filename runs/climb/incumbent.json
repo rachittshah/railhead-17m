@@ -1,7 +1,9 @@
 {
  "config": {
-  "name": "base",
-  "data": {},
+  "name": "1023-2119-coarse03",
+  "data": {
+   "expansions": false
+  },
   "init": "bekko",
   "epochs": 8,
   "batch_size": 16,
@@ -31,29 +33,29 @@
   "distill_max": 0,
   "distill_temperature": 1.0,
   "obs_dir": "obs-v3",
+  "distill_ref": "",
   "freeze_embeddings": false,
   "freeze_layers": 0,
   "select_metric": "exp_regret",
   "patience": 3
  },
- "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s1/model",
+ "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-2119-coarse03-s1/model",
  "val": {
-  "regret": 0.20976,
-  "exp_regret": 0.28258,
-  "capture": 0.18087,
-  "hit": 0.28125,
-  "nll": 2.15613,
-  "conf": 0.17091,
-  "pick_hold": 0.0625,
-  "play_regret": 0.19024,
-  "ece": 0.11034,
-  "n": 128
+  "regret": 0.30889367062246176,
+  "exp_regret": 0.36446375425317096,
+  "capture": 0.07530882422869796,
+  "hit": 0.3253012048192771,
+  "nll": 2.1767986343490016,
+  "conf": 0.17406214758691343,
+  "pick_hold": 0.060240963855421686,
+  "play_regret": 0.2936836568625796,
+  "ece": 0.15295495505653567,
+  "n": 83.0
  },
  "seed_dirs": [
-  "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s0/model",
-  "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s1/model",
-  "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s2/model"
+  "/Users/rachitt/railhead-17m/runs/train/1023-2119-coarse03-s0/model",
+  "/Users/rachitt/railhead-17m/runs/train/1023-2119-coarse03-s1/model",
+  "/Users/rachitt/railhead-17m/runs/train/1023-2119-coarse03-s2/model"
  ],
- "saved": "2026-10-23 21:03:00",
- "note": "restored: pass-7 self-distilled incumbent lost in closed loop (-0.405 [-0.787, -0.036] asinh nw, 26 devhub maps x 2 seeds)"
+ "saved": "2026-10-23 22:27:37"
 }
