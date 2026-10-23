@@ -182,14 +182,17 @@ def selfplay(task_id: str, root: Path, seed: int, policy: str = "mix", max_state
                 if model is not None:
                     from rh17m.play import wakeup_observation
 
-                    obs, cands = wakeup_observation(world, task, end_date, 8, model_dcfg(model))
+                    obs, cands, exps = wakeup_observation(world, task, end_date, 8, model_dcfg(model))
                     keys = [k for k, _ in obs["options"]]
                     if rng.random() < epsilon:
                         key = rng.choice(keys)
                     else:
                         probs = model(obs)
                         key = max(probs, key=lambda k: (probs[k], k == "hold"))
-                    pick = next((c for c in cands if c.candidate_id == key), None)
+                    if key != "hold":
+                        from rh17m.expand import apply_option
+
+                        apply_option(world, key, cands, exps)
                 elif rng.random() < p_build:
                     snap = take_snapshot(querier_for(world, task, end_date))
                     labels = {c["id"]: c["label"] for c in world.call("cargos")}

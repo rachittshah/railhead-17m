@@ -17,6 +17,7 @@ from pathlib import Path
 from railhead.task import TaskSpec
 from railhead.world import World
 
+from rh17m.expand import expansion_candidates
 from rh17m.labels import LabelConfig, candidate_extras, querier_for
 from rh17m.states import find_task, list_states, load_meta
 
@@ -36,11 +37,13 @@ def observe_state(root: Path, state_id: str, max_air: int = LabelConfig.max_air)
             cands = [c for c in enumerate_routes(snap, routes, max_per_mode=max_air, cargo_labels=labels)
                      if c.mode == "air"][:max_air]
             extras = candidate_extras(snap, cands, labels)
+            exps = expansion_candidates(snap, routes, world.call("depots"))
             money0 = int(world.call("company").get("money") or 0)
             return {"state": dataclasses.asdict(meta), "money0": money0,
                     "rendered_state": render_state(snap, routes, cands),
                     "candidates": [{**dataclasses.asdict(c), **extras.get(c.candidate_id, {})} for c in cands],
-                    "options": [c.candidate_id for c in cands] + ["hold"]}
+                    "expansions": [dataclasses.asdict(e) for e in exps],
+                    "options": [c.candidate_id for c in cands] + [e.key for e in exps] + ["hold"]}
         finally:
             world.close()
 

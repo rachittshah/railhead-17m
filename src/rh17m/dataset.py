@@ -36,6 +36,7 @@ class DatasetConfig:
     drop_candidate_table: bool = True  # the options already describe the candidates
     ranks: bool = False  # add each option's rank among the options (length, smaller town, cost)
     plane: bool = False  # name the fastest eligible plane with its speed and capacity (labels from lbl-v2.1)
+    expansions: bool = True  # offer "add planes to an existing route" options (labels from lbl-v3)
 
 
 def map_split(task_id: str) -> str:
@@ -122,7 +123,8 @@ def rank_text(candidates: list[dict], i: int) -> str:
             f"{_ordinal(rank(lambda c: c['estimated_cost'], False))} cheapest of {n} routes")
 
 
-def observation(rendered_state: dict, candidates: list[dict], money0: int, cfg: DatasetConfig) -> dict:
+def observation(rendered_state: dict, candidates: list[dict], money0: int, cfg: DatasetConfig,
+                expansions: list[dict] | tuple = ()) -> dict:
     """What a policy sees at a wake-up: the state text, the question and the options, plus the scripted
     baselines' features. The training examples and the online player both build it here, so the model reads
     the same text offline and in play."""
@@ -131,6 +133,10 @@ def observation(rendered_state: dict, candidates: list[dict], money0: int, cfg: 
                    if cfg.plane and c.get("plane") else "")) for c in candidates]
     if cfg.ranks and candidates:
         options = [(k, f"{text}; {rank_text(candidates, i)}") for i, (k, text) in enumerate(options)]
+    if cfg.expansions:
+        from rh17m.expand import describe_expansion
+
+        options += [(e["key"], describe_expansion(e, money0)) for e in expansions]
     options.append((HOLD, "build nothing now and keep the cash"))
     state = dict(rendered_state)
     if cfg.drop_candidate_table:
@@ -152,15 +158,22 @@ def build_example(rec: dict, cfg: DatasetConfig) -> dict | None:
     if max(q.values()) - min(q.values()) < cfg.min_spread:
         return None
     by_id = {c["candidate_id"]: c for c in rec["candidates"]}
-    cands = [by_id[k] for k in rec["options"] if k != HOLD]
+    cands = [by_id[k] for k in rec["options"] if k in by_id]
+    exps = rec.get("expansions", []) if cfg.expansions else []
+    if not cfg.expansions:  # route-only view of a v3 record: drop the expansion options and their values
+        keep = {c["candidate_id"] for c in cands} | {HOLD}
+        q = {k: v for k, v in q.items() if k in keep}
+        se = {k: v for k, v in se.items() if k in keep}
+        if max(q.values()) - min(q.values()) < cfg.min_spread:
+            return None
     meta = rec["state"]
     # Which options changed the world when built (a build that failed before spending is the hold world):
     # the offline replay of the player's fallback rule needs it (evaluate.play_regret).
     built = {k: (k == HOLD or bool(o.get("ok")) or bool(o.get("cost")) or "alias" not in o)
-             for k, o in rec["outcomes"].items()}
+             for k, o in rec["outcomes"].items() if k in q}
     return {
         "id": meta["state_id"], "task_id": meta["task_id"], "split": map_split(meta["task_id"]),
-        "source": meta["source"], **observation(rec["rendered_state"], cands, rec["money0"], cfg),
+        "source": meta["source"], **observation(rec["rendered_state"], cands, rec["money0"], cfg, exps),
         "q": q, "se": se, "target": soft_target(q, cfg.tau), "best": max(q, key=q.get), "built": built,
     }
 
@@ -190,5 +203,6 @@ def load_observations(obs_dir: Path, cfg: DatasetConfig = DatasetConfig(), split
         if split not in splits or not rec["candidates"]:
             continue
         out.append({"id": meta["state_id"], "task_id": meta["task_id"], "split": split, "source": meta["source"],
-                    **observation(rec["rendered_state"], rec["candidates"], rec["money0"], cfg)})
+                    **observation(rec["rendered_state"], rec["candidates"], rec["money0"], cfg,
+                                  rec.get("expansions", []) if cfg.expansions else [])})
     return out

@@ -24,14 +24,15 @@ from railhead.task import TaskSpec
 from railhead.world import World
 
 from rh17m.dataset import HOLD, DatasetConfig, observation
-from rh17m.labels import LabelConfig, build_affordable, candidate_extras, querier_for
+from rh17m.expand import apply_option, expansion_candidates
+from rh17m.labels import LabelConfig, candidate_extras, querier_for
 from rh17m.states import find_task
 
 Policy = Callable[[dict], dict[str, float]]
 
 
 def wakeup_observation(world: World, task: TaskSpec, end_date: int, max_air: int,
-                       dcfg: DatasetConfig) -> tuple[dict, list]:
+                       dcfg: DatasetConfig, max_expand: int = 3) -> tuple[dict, list, list]:
     from rhs1.candidates import enumerate_routes
     from rhs1.snapshot import aggregate_routes, render_state, take_snapshot
 
@@ -43,10 +44,13 @@ def wakeup_observation(world: World, task: TaskSpec, end_date: int, max_air: int
     money0 = int(world.call("company").get("money") or 0)
     extras = candidate_extras(snap, cands, labels)
     cand_dicts = [{**asdict(c), **extras.get(c.candidate_id, {})} for c in cands]
-    return observation(render_state(snap, routes, cands), cand_dicts, money0, dcfg), cands
+    exps = (expansion_candidates(snap, routes, world.call("depots"), max_expand)
+            if dcfg.expansions and max_expand else [])
+    obs = observation(render_state(snap, routes, cands), cand_dicts, money0, dcfg, [asdict(e) for e in exps])
+    return obs, cands, exps
 
 
-PLAYER_V = "play-v2"  # v2: on a failure that spent nothing, try the next option; failed routes are blocked
+PLAYER_V = "play-v3"  # v2: fall back on no-spend failures, block failed routes; v3: expansion options
 
 
 def wakeup_options(obs: dict, blocked: set[str]) -> dict:
@@ -79,7 +83,7 @@ def play(task_id: str, policy: Policy, seed: int, wake_days: int = 90, max_air: 
             end_date = int(world.state()["date"]) + task.horizon_days
             policy_s = 0.0
             while int(world.state()["date"]) < end_date:
-                obs, cands = wakeup_observation(world, task, end_date, max_air, dcfg)
+                obs, cands, exps = wakeup_observation(world, task, end_date, max_air, dcfg)
                 obs = wakeup_options(obs, blocked)
                 t1 = time.perf_counter()
                 probs = policy(obs)
@@ -90,16 +94,17 @@ def play(task_id: str, policy: Policy, seed: int, wake_days: int = 90, max_air: 
                 for key in order[:max_tries]:
                     if key == HOLD:
                         break
-                    c = next(c for c in cands if c.candidate_id == key)
-                    br, used = build_affordable(world, c.a["id"], c.b["id"])
-                    rec["tries"].append({"key": key, "ok": br.ok, "cost": br.cost, "ladder": list(used),
-                                         "failed": br.failed_step})
-                    if br.ok or br.cost or br.steps:  # built, or spent money: this wake-up's decision is made
-                        rec.update(pick=key, ok=br.ok, cost=br.cost, ladder=list(used), failed=br.failed_step)
-                        if not br.ok:
+                    r = apply_option(world, key, cands, exps)
+                    rec["tries"].append({"key": key, "kind": r["kind"], "ok": r["ok"], "cost": r["cost"],
+                                         "ladder": r.get("ladder"), "planes": r.get("planes"),
+                                         "failed": r["failed_step"]})
+                    if r["ok"] or r["cost"] or r["steps"]:  # built, or spent money: the decision is made
+                        rec.update(pick=key, kind=r["kind"], ok=r["ok"], cost=r["cost"], failed=r["failed_step"])
+                        if not r["ok"] and r["kind"] == "route":
                             blocked.add(key)
                         break
-                    blocked.add(key)
+                    if r["kind"] == "route":  # an expansion refused for cash can succeed later
+                        blocked.add(key)
                 decisions.append(rec)
                 days = min(wake_days, end_date - int(world.state()["date"]))
                 world.step(days=max(days, 1))

@@ -31,6 +31,7 @@ from railhead.bridge import BridgeError
 from railhead.task import TaskSpec
 from railhead.world import World
 
+from rh17m.expand import as_dicts, expand_affordable, expansion_candidates
 from rh17m.states import find_task, list_states, load_meta
 
 log = logging.getLogger(__name__)
@@ -45,8 +46,9 @@ class LabelConfig:
     chunk_days: int = 91
     chunks: int = 8  # 728 days: about two years, long enough for an air route to pay back
     max_air: int = 8
+    max_expand: int = 3  # expansion options: add planes to the most profitable existing air routes
     planes: int = 2
-    version: str = "lbl-v2.4"  # v2.1 plane; v2.2 NO_SITE ladder, no-build skip; v2.3 2 train seeds; v2.4 1 train seed
+    version: str = "lbl-v3"  # v2.x: route options only; v3: + expansion options (add planes to existing routes)
 
 
 # How a chosen route is built: the first configuration the company can pay for. A large airport with two
@@ -163,15 +165,29 @@ def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig()) -> 
                         saves[c.candidate_id] = child.save(tmp / f"opt-{i}.sav")
                 finally:
                     child.close()
+            exps = expansion_candidates(snap, routes, parent.call("depots"), cfg.max_expand) if cfg.max_expand else []
+            for i, e in enumerate(exps):
+                child = parent.fork(tmp / f"expand{i}")
+                try:
+                    r = expand_affordable(child, e)
+                    builds[e.key] = {"ok": r["ok"], "cost": r["cost"], "failed_step": r["failed_step"],
+                                     "planes": r["planes"], "kind": "expand"}
+                    if not r["planes"] and not r["cost"]:
+                        aliases.add(e.key)
+                    else:
+                        saves[e.key] = child.save(tmp / f"opt-x{i}.sav")
+                finally:
+                    child.close()
         finally:
             parent.close()
         t_build = time.perf_counter() - t0
-        if cands and len(aliases) == len(cands):
+        options = [c.candidate_id for c in cands] + [e.key for e in exps] + [HOLD]
+        if len(options) > 1 and len(aliases) == len(options) - 1:
             # Nothing could be built, so every option is the hold world: no signal, no rollouts.
             return {"version": cfg.version, "config": asdict(cfg), "state": asdict(meta), "seeds": seeds,
                     "nw0": nw0, "money0": money0, "rendered_state": rendered,
                     "candidates": [{**dataclasses.asdict(c), **extras.get(c.candidate_id, {})} for c in cands],
-                    "options": [c.candidate_id for c in cands] + [HOLD], "uninformative": "no_build",
+                    "expansions": as_dicts(exps), "options": options, "uninformative": "no_build",
                     "builds": builds, "timing": {"build_s": round(t_build, 2), "total_s": round(t_build, 2)}}
         # No need to simulate past the end of the game (horizon + run-off year), where the arena scores.
         left = meta.end_date + 365 - meta.date
@@ -186,7 +202,7 @@ def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig()) -> 
         "version": cfg.version, "config": asdict(cfg), "state": asdict(meta), "seeds": seeds,
         "nw0": nw0, "money0": money0, "rendered_state": rendered,
         "candidates": [{**dataclasses.asdict(c), **extras.get(c.candidate_id, {})} for c in cands],
-        "options": [c.candidate_id for c in cands] + [HOLD],
+        "expansions": as_dicts(exps), "options": options,
         "outcomes": outcomes,
         "timing": {"build_s": round(t_build, 2), "total_s": round(time.perf_counter() - t0, 2)},
     }
