@@ -131,6 +131,33 @@ def _publish(a: argparse.Namespace) -> int:
     return 0
 
 
+def _watch(a: argparse.Namespace) -> int:
+    """Log data-pipeline growth to Trackio (project railhead-17m-data) every ``interval`` seconds."""
+    import time
+
+    import trackio
+
+    from rh17m.dataset import DatasetConfig, load_examples
+
+    trackio.init(project="railhead-17m-data", name=time.strftime("pipeline-%m%d-%H%M"), embed=False,
+                 auto_log_cpu=True)
+    labels, states = Path(a.labels), Path(a.states)
+    step, prev, t_prev = 0, None, time.time()
+    while True:
+        recs = [p for p in labels.glob("arena*.json") if not p.name.endswith(".error.json")]
+        exs = load_examples(labels, DatasetConfig())
+        now = time.time()
+        rate = 0.0 if prev is None else (len(recs) - prev) / max(now - t_prev, 1) * 3600
+        m = {"data/states": len(list(states.glob("*.json"))), "data/labelled": len(recs),
+             "data/errors": len(list(labels.glob("*.error.json"))), "data/labels_per_hour": rate,
+             "data/examples": len(exs)}
+        for split in ("train", "val", "test", "ood"):
+            m[f"data/examples_{split}"] = sum(e["split"] == split for e in exs)
+        trackio.log(m, step=step)
+        step, prev, t_prev = step + 1, len(recs), now
+        time.sleep(a.interval)
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(prog="rh17m")
@@ -200,6 +227,12 @@ def main(argv: list[str] | None = None) -> int:
     pb.add_argument("--card", default="")
     pb.add_argument("--labels", default=str(DATA / "labels"))
     pb.set_defaults(fn=_publish)
+
+    wt = sub.add_parser("watch", help="stream data-pipeline growth to Trackio")
+    wt.add_argument("--labels", default=str(DATA / "labels"))
+    wt.add_argument("--states", default=str(DATA / "states"))
+    wt.add_argument("--interval", type=int, default=120)
+    wt.set_defaults(fn=_watch)
 
     b = sub.add_parser("bench", help="simulator throughput")
     b.add_argument("rest", nargs=argparse.REMAINDER)

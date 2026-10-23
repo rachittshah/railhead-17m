@@ -88,6 +88,7 @@ def climb(base: TrainConfig, labels_dir: Path, noise_seeds: int = 3, max_runs: i
             f.write(json.dumps(row) + "\n")
 
     def train(cfg: TrainConfig) -> Path:
+        cfg.group = f"climb-{stamp}"
         out = ROOT / "runs" / "train" / cfg.name
         run(cfg, labels_dir, out)
         return out / "model"

@@ -43,6 +43,9 @@ class TrainConfig:
     pad_multiple: int = 64
     compile: bool = True  # traced train step (shapes bucketed by pad_multiple)
     bf16: bool = True  # bf16 compute with fp32 master weights while training; evaluation runs in fp32
+    track: bool = True  # stream metrics to Trackio (project "railhead-17m"; `trackio show` for the dashboard)
+    group: str = ""  # Trackio run group (the climb sets one per climb)
+    log_every: int = 5  # steps between train metric logs
     train_splits: tuple[str, ...] = ("train",)
     max_train: int = 0  # 0 = all
 
@@ -84,6 +87,47 @@ def _load(init: str):
     return B.load() if init == "bekko" else B.load(init, revision=None)
 
 
+TRACK_PROJECT = "railhead-17m"
+
+
+class _Tracker:
+    """Trackio when enabled and importable; otherwise a no-op. Tracking never stops a training run."""
+
+    def __init__(self, cfg: TrainConfig, extra: dict):
+        self.run = None
+        if not cfg.track:
+            return
+        try:
+            import trackio
+
+            self.trackio = trackio
+            self.run = trackio.init(project=TRACK_PROJECT, name=cfg.name, group=cfg.group or None,
+                                    config={**asdict(cfg), **extra}, embed=False, auto_log_gpu=True)
+        except Exception as e:  # noqa: BLE001 - the dashboard is optional
+            print(f"trackio disabled: {e!r}")
+
+    def log(self, metrics: dict, step: int) -> None:
+        if self.run is not None:
+            try:
+                self.trackio.log({k: v for k, v in metrics.items() if isinstance(v, (int, float))}, step=step)
+            except Exception as e:  # noqa: BLE001
+                print(f"trackio log failed: {e!r}")
+
+    def finish(self) -> None:
+        if self.run is not None:
+            try:
+                self.trackio.finish()
+            except Exception as e:  # noqa: BLE001
+                print(f"trackio finish failed: {e!r}")
+
+
+def _lr(opt, index: int) -> float:
+    try:
+        return float(opt.optimizers[index].learning_rate)
+    except Exception:  # noqa: BLE001
+        return float("nan")
+
+
 def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -109,6 +153,8 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
     best = {"epoch": -1, "exp_regret": float("inf")}
     best_params = None
     hist = (out_dir / "history.jsonl").open("w")
+    tracker = _Tracker(cfg, {"n_" + k: len(v) for k, v in splits.items()} | {"n_train_used": len(train)})
+    gstep = 0
     t0 = time.perf_counter()
     for epoch in range(cfg.epochs):
         model.set_compute_dtype(train_dtype)
@@ -124,7 +170,13 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
                     rng.shuffle(perm)
                 enc.append(_encode(tok, ex, rng.choice(cfg.layouts), perm))
             batch = B.collate(enc, tasks=model.tasks, pad_multiple=cfg.pad_multiple)
+            ts = time.perf_counter()
             losses.append(float(step(batch)))
+            gstep += 1
+            if gstep % cfg.log_every == 0:
+                tracker.log({"train/loss": losses[-1], "train/lr_encoder": _lr(opt, 1), "train/lr_heads": _lr(opt, 0),
+                             "train/examples_per_s": len(enc) / max(time.perf_counter() - ts, 1e-9),
+                             "train/epoch": epoch + b / max(1, len(order))}, gstep)
         model.set_compute_dtype(mx.float32)
         row = {"epoch": epoch, "loss": float(np.mean(losses)), "elapsed_s": round(time.perf_counter() - t0, 1)}
         if val:
@@ -135,6 +187,8 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
                 best_params = {k: mx.array(v) for k, v in B.state_dict(model).items()}
         hist.write(json.dumps(row) + "\n")
         hist.flush()
+        tracker.log({"train/epoch_loss": row["loss"],
+                     **{f"val/{k[4:]}": v for k, v in row.items() if k.startswith("val_")}}, gstep)
     hist.close()
     if best_params is not None:
         model.load_weights(list(best_params.items()))
@@ -154,4 +208,15 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
                                                  "config": asdict(cfg)})
     (out_dir / "model" / "rh17m.json").write_text(json.dumps({"temperature": temperature, "data": cfg.data}))
     (out_dir / "results.json").write_text(json.dumps(results, indent=1))
+    final = {"final/temperature": temperature, "final/best_epoch": best["epoch"]}
+    for s in ("val", "test", "ood"):
+        for k, v in results.get(s, {}).items():
+            final[f"final/{s}_{k}"] = v
+        for name in ("longest", "uniform", "hold"):
+            for k in ("regret", "exp_regret", "capture"):
+                v = results.get(f"{s}_baselines", {}).get(name, {}).get(k)
+                if v is not None:
+                    final[f"final/{s}_baseline_{name}_{k}"] = v
+    tracker.log(final, gstep + 1)
+    tracker.finish()
     return results
