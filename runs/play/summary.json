@@ -7,33 +7,31 @@
   "arena-dev-0218",
   "arena-dev-0220",
   "arena-dev-0221",
-  "arena-dev-0222"
+  "arena-dev-0222",
+  "arena-dev-0230",
+  "arena-dev-0232",
+  "arena-dev-0233"
  ],
  "policies": {
-  "model:1023-1209-base-s2": {
-   "mean_score": 0.6119,
-   "median_nw": 3980812,
-   "games": 8
+  "model:1023-1627-base-s1": {
+   "mean_score": 0.7349,
+   "median_nw": 8039037,
+   "games": 11
   },
   "hold": {
    "mean_score": 0.0,
-   "median_nw": -41800,
-   "games": 8
+   "median_nw": -36300,
+   "games": 11
   },
   "longest": {
-   "mean_score": 0.5083,
-   "median_nw": 1746428,
-   "games": 8
-  },
-  "longest_affordable": {
-   "mean_score": 0.1365,
-   "median_nw": -25300,
-   "games": 8
+   "mean_score": 0.6647,
+   "median_nw": 4789564,
+   "games": 11
   },
   "random": {
-   "mean_score": 0.6314,
-   "median_nw": 4345184,
-   "games": 8
+   "mean_score": 0.7325,
+   "median_nw": 5264998,
+   "games": 11
   }
  }
 }
