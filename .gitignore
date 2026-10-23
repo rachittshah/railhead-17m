@@ -13,3 +13,4 @@ checkpoints/
 data/
 runs/train/*/model/
 runs/play/*/
+runs/teachers/
