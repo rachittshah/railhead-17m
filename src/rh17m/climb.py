@@ -97,8 +97,17 @@ def _git_push(message: str, paths: list[Path]) -> None:
     rel = [str(p.relative_to(ROOT)) for p in paths if p.exists()]
     if not rel:
         return
-    subprocess.run(["git", "add", *rel], cwd=ROOT, check=False)
-    subprocess.run(["git", "commit", "-q", "-m", message], cwd=ROOT, check=False)
+    for _ in range(10):  # other stages commit too: retry while the index is locked
+        add = subprocess.run(["git", "add", *rel], cwd=ROOT, check=False, capture_output=True, text=True)
+        if "index.lock" not in add.stderr:
+            break
+        time.sleep(3)
+    for _ in range(10):
+        commit = subprocess.run(["git", "commit", "-q", "-m", message], cwd=ROOT, check=False, capture_output=True,
+                                text=True)
+        if "index.lock" not in commit.stderr:
+            break
+        time.sleep(3)
     subprocess.run(["git", "push", "-q"], cwd=ROOT, check=False)
 
 
