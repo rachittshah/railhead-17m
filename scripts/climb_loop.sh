@@ -25,9 +25,9 @@ while [[ ! -f data/labels/.stop ]]; do
       && echo "$(date +%H:%M) teacher $tname ready" >> data/logs/climb_loop.log
     [[ -f runs/climb/incumbent.json ]] && cp runs/climb/incumbent.json runs/climb/incumbent.prev.json
     if [[ -f runs/climb/incumbent.json ]]; then
-      $R climb --from-incumbent --seeds 3 --metric ${CLIMB_METRIC:-exp_regret} --max-runs ${MAX_RUNS:-110} >> data/logs/climb.log 2>&1
+      $R climb --from-incumbent --seeds 3 --metric ${CLIMB_METRIC:-exp_regret} --val-continuation ${VAL_CONTINUATION:-expand} --max-runs ${MAX_RUNS:-110} >> data/logs/climb.log 2>&1
     else
-      $R climb --seeds 3 --metric ${CLIMB_METRIC:-exp_regret} --max-runs ${MAX_RUNS:-110} >> data/logs/climb.log 2>&1
+      $R climb --seeds 3 --metric ${CLIMB_METRIC:-exp_regret} --val-continuation ${VAL_CONTINUATION:-expand} --max-runs ${MAX_RUNS:-110} >> data/logs/climb.log 2>&1
     fi
     inc=$(.venv/bin/python -I -c "import json; print(json.load(open('runs/climb/incumbent.json'))['model_dir'])" 2>/dev/null)
     prev=$(.venv/bin/python -I -c "import json; print(json.load(open('runs/climb/incumbent.prev.json'))['model_dir'])" 2>/dev/null)

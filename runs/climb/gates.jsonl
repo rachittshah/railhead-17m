@@ -1,0 +1,2 @@
+{"candidate": "1023-1713-coarse05-s2", "reference": "1023-1627-base-s1", "maps": 26, "seeds": [1, 2], "diff_asinh_nw": -0.405, "ci": [-0.787, -0.036], "verdict": "reject", "at": "2026-10-23 21:03", "note": "self-distillation kept by pass 7 offline"}
+{"candidate": "1023-1713-coarse02-s2", "reference": "1023-1627-base-s1", "maps": 26, "seeds": [1, 2], "diff_asinh_nw": -0.44, "ci": [-0.836, -0.074], "verdict": "reject", "at": "2026-10-23 20:28", "note": "ensemble distillation (not kept offline)"}

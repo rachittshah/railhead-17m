@@ -1,6 +1,6 @@
 {
  "config": {
-  "name": "1023-1713-coarse05",
+  "name": "base",
   "data": {},
   "init": "bekko",
   "epochs": 8,
@@ -14,46 +14,46 @@
    "instruction_state",
    "state_instruction"
   ],
-  "seed": 1,
+  "seed": 0,
   "pad_multiple": 64,
   "compile": true,
   "bf16": true,
   "track": true,
-  "artifact": false,
+  "artifact": true,
   "n_traces": 20,
-  "group": "climb-1023-1242",
+  "group": "",
   "log_every": 5,
   "train_splits": [
    "train"
   ],
   "max_train": 0,
-  "distill_from": "/Users/rachitt/railhead-17m/runs/train/1023-1713-base-s2/model",
-  "distill_max": 1000,
+  "distill_from": "",
+  "distill_max": 0,
   "distill_temperature": 1.0,
   "obs_dir": "obs-v3",
   "freeze_embeddings": false,
   "freeze_layers": 0,
   "select_metric": "exp_regret",
-  "patience": 3,
-  "distill_ref": "@incumbent"
+  "patience": 3
  },
- "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-1713-coarse05-s2/model",
+ "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s1/model",
  "val": {
-  "regret": 0.2474923264769648,
-  "exp_regret": 0.32220110835301646,
-  "capture": 0.18562936386523432,
-  "hit": 0.28703703703703703,
-  "nll": 2.1839716315146753,
-  "conf": 0.16055539724179926,
-  "pick_hold": 0.0,
-  "play_regret": 0.21953971995599716,
-  "ece": 0.12725203557938616,
-  "n": 180.0
+  "regret": 0.20976,
+  "exp_regret": 0.28258,
+  "capture": 0.18087,
+  "hit": 0.28125,
+  "nll": 2.15613,
+  "conf": 0.17091,
+  "pick_hold": 0.0625,
+  "play_regret": 0.19024,
+  "ece": 0.11034,
+  "n": 128
  },
  "seed_dirs": [
-  "/Users/rachitt/railhead-17m/runs/train/1023-1713-coarse05-s0/model",
-  "/Users/rachitt/railhead-17m/runs/train/1023-1713-coarse05-s1/model",
-  "/Users/rachitt/railhead-17m/runs/train/1023-1713-coarse05-s2/model"
+  "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s0/model",
+  "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s1/model",
+  "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s2/model"
  ],
- "saved": "2026-10-23 19:09:55"
+ "saved": "2026-10-23 21:03:00",
+ "note": "restored: pass-7 self-distilled incumbent lost in closed loop (-0.405 [-0.787, -0.036] asinh nw, 26 devhub maps x 2 seeds)"
 }

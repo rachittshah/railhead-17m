@@ -137,6 +137,7 @@ def _climb(a: argparse.Namespace) -> int:
     import rh17m.climb as C
 
     C.METRIC = a.metric
+    C.VAL_CONTINUATION = a.val_continuation
     best = climb(base, Path(a.labels), seeds=tuple(range(a.seeds)), max_runs=a.max_runs, push=not a.no_push,
                  only_control=a.only_control)
     print(json.dumps({"incumbent": best.name}))
@@ -293,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
     cl.add_argument("--set", nargs="*", default=[])
     cl.add_argument("--seeds", type=int, default=2, help="seeds per config; scores are seed-averaged")
     cl.add_argument("--metric", default="exp_regret", choices=["exp_regret", "play_regret", "regret", "nll"])
+    cl.add_argument("--val-continuation", default="any", choices=["any", "hold", "expand"],
+                    help="judge only on val decisions labelled under this rollout continuation")
     cl.add_argument("--max-runs", type=int, default=60)
     cl.add_argument("--no-push", action="store_true")
     cl.add_argument("--from-incumbent", action="store_true", help="start from runs/climb/incumbent.json")
