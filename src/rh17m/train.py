@@ -48,6 +48,9 @@ class TrainConfig:
     log_every: int = 5  # steps between train metric logs
     train_splits: tuple[str, ...] = ("train",)
     max_train: int = 0  # 0 = all
+    distill_from: str = ""  # teacher (run model dir or release name) that soft-labels unlabelled train states
+    distill_max: int = 0  # cap on teacher-labelled examples (0 = all available)
+    distill_temperature: float = 1.0  # extra temperature on the teacher's probabilities
 
 
 def _encode(tok, ex: dict, layout: str, perm: list[int] | None = None) -> B.EncodedDecision:
@@ -131,6 +134,21 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
         train = rng.sample(train, min(cfg.max_train, len(train)))
     if not train:
         raise ValueError("no training examples")
+    n_distill = 0
+    if cfg.distill_from:
+        from rh17m.dataset import load_observations
+
+        teacher = _load(cfg.distill_from)
+        meta = Path(cfg.distill_from) / "rh17m.json"
+        t_temp = (json.loads(meta.read_text())["temperature"] if meta.exists() else 1.0) * cfg.distill_temperature
+        unl = load_observations(Path(labels_dir).parent / "obs", dcfg, exclude={e["id"] for e in exs})
+        if cfg.distill_max:
+            unl = rng.sample(unl, min(cfg.distill_max, len(unl)))
+        for e, p in zip(unl, predict(teacher, unl, t_temp), strict=True):
+            e["target"] = p
+        train = train + unl
+        n_distill = len(unl)
+        del teacher
     mx.random.seed(cfg.seed)
     model = _load(cfg.init)
     tok = model.tokenizer
@@ -143,7 +161,8 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
     best = {"epoch": -1, "exp_regret": float("inf")}
     best_params = None
     hist = (out_dir / "history.jsonl").open("w")
-    tracker = _tracker(cfg, {"n_" + k: len(v) for k, v in splits.items()} | {"n_train_used": len(train)})
+    tracker = _tracker(cfg, {"n_" + k: len(v) for k, v in splits.items()} | {"n_train_used": len(train),
+                                                                              "n_distill": n_distill})
     gstep = 0
     t0 = time.perf_counter()
     for epoch in range(cfg.epochs):
@@ -184,6 +203,7 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
         model.load_weights(list(best_params.items()))
     temperature = fit_temperature(val, predict(model, val)) if val else 1.0
     results = {"name": cfg.name, "examples": {k: len(v) for k, v in splits.items()}, "train_used": len(train),
+               "distilled": n_distill,
                "best_epoch": best["epoch"], "temperature": temperature,
                "train_s": round(time.perf_counter() - t0, 1)}
     for s in ("val", "test", "ood"):

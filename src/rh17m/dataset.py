@@ -170,3 +170,21 @@ def load_examples(labels_dir: Path, cfg: DatasetConfig = DatasetConfig()) -> lis
         if ex is not None:
             out.append(ex)
     return out
+
+
+def load_observations(obs_dir: Path, cfg: DatasetConfig = DatasetConfig(), splits: tuple[str, ...] = ("train",),
+                      exclude: set[str] | frozenset[str] = frozenset()) -> list[dict]:
+    """Unlabelled examples (no q/target) from ``observe`` records, for teacher soft-labelling. Only the given
+    map splits (train by default, so val/test maps never leak into training) and states not in ``exclude``."""
+    out = []
+    for p in sorted(Path(obs_dir).glob("*.json")):
+        if p.stem in exclude:
+            continue
+        rec = json.loads(p.read_text())
+        meta = rec["state"]
+        split = map_split(meta["task_id"])
+        if split not in splits or not rec["candidates"]:
+            continue
+        out.append({"id": meta["state_id"], "task_id": meta["task_id"], "split": split, "source": meta["source"],
+                    **observation(rec["rendered_state"], rec["candidates"], rec["money0"], cfg)})
+    return out
