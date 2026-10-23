@@ -99,14 +99,14 @@ def _net_worth(world: World) -> tuple[int, int]:
     return money - int(c.get("loan") or 0), money
 
 
-def _rollout(save: Path, workdir: Path, seed: int, cfg: LabelConfig) -> dict:
+def _rollout(save: Path, workdir: Path, seed: int, cfg: LabelConfig, chunks: int | None = None) -> dict:
     world = World.load(workdir, save)
     try:
         out = world.admin.rcon(f"reseed {seed & 0xFFFFFFFF}")
         if not out or not out[0].startswith("Reseeded"):
             raise RuntimeError(f"engine lacks the reseed patch: {out!r}")
         nw, money = [], []
-        for _ in range(cfg.chunks):
+        for _ in range(cfg.chunks if chunks is None else chunks):
             world.step(days=cfg.chunk_days)
             a, b = _net_worth(world)
             nw.append(a)
@@ -161,10 +161,13 @@ def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig()) -> 
         finally:
             parent.close()
         t_build = time.perf_counter() - t0
+        # No need to simulate past the end of the game (horizon + run-off year), where the arena scores.
+        left = meta.end_date + 365 - meta.date
+        chunks = max(1, min(cfg.chunks, -(-left // cfg.chunk_days)))
         outcomes: dict[str, Any] = {}
         for key, save in saves.items():
             outcomes[key] = {**builds[key], "rollouts": [
-                _rollout(save, tmp / f"roll-{key}-{m}", s, cfg) for m, s in enumerate(seeds)]}
+                _rollout(save, tmp / f"roll-{key}-{m}", s, cfg, chunks) for m, s in enumerate(seeds)]}
         for key in aliases:  # same world and same seeds as hold: the rollouts would repeat hold's exactly
             outcomes[key] = {**builds[key], "alias": HOLD, "rollouts": outcomes[HOLD]["rollouts"]}
     return {
