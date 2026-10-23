@@ -238,7 +238,7 @@ def track_report(play_root: Path, summary: dict) -> None:
 
     try:
         from decision_mlx.tracking import Tracker
-        if not hasattr(Tracker, "log_table"):
+        if not hasattr(Tracker, "_call"):  # PRs #7-#11
             raise ImportError
     except ImportError:
         from rh17m._tracking import Tracker

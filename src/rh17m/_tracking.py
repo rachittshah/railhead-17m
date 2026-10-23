@@ -1,4 +1,4 @@
-"""Vendored copy of decision_mlx.tracking (decision-mlx PRs #7-#10); used only while the local decision-mlx
+"""Vendored copy of decision_mlx.tracking (decision-mlx PRs #7-#11); used only while the local decision-mlx
 checkout predates them. Optional experiment tracking with Trackio (local-first, wandb-compatible API).
 
     with Tracker("decision-mlx", name="kev-eval", config={"model": model}) as tracker:
@@ -113,6 +113,7 @@ class Tracker:
         self._failed = False
         self._sampler: threading.Thread | None = None
         self._run = None
+        self._project = project
         self._stop = threading.Event()
         if not enabled:
             return
@@ -131,8 +132,10 @@ class Tracker:
                                                             config=dict(config or {}), **init_kwargs))):
             return
         self._trackio = trackio
-        # trackio.log_system finds the run through a ContextVar that threads do not inherit, so the sampler
-        # thread logs through the Run object itself (as Trackio's own monitors do).
+        # Trackio's module functions (log, alert, log_artifact, log_system, finish) act on a "current run" held
+        # in a ContextVar: threads do not inherit it, and a second tracker in the same process (a training run
+        # inside a hyperparameter search) replaces and then clears it. Every call goes through this tracker's
+        # own Run object instead, falling back to the module functions only if init returned none.
         self._run = runs[0] if runs else None
         if system_interval:
             self._sampler = threading.Thread(target=self._sample, args=(float(system_interval),), daemon=True)
@@ -166,11 +169,19 @@ class Tracker:
             self._failed = True
             return False
 
+    def _call(self, method: str, *args: Any, **kwargs: Any) -> None:
+        """``self._run.<method>`` when the Run has it, else the module function (same name)."""
+        def call():
+            fn = getattr(self._run, method, None) if self._run is not None else None
+            (fn or getattr(self._trackio, method))(*args, **kwargs)
+
+        self._guard(call)
+
     def log(self, metrics: Mapping[str, Any], step: int | None = None) -> None:
         if self.active:
             numeric = flatten(metrics)
             if numeric:
-                self._guard(lambda: self._trackio.log(numeric, step=step))
+                self._call("log", numeric, step=step)
 
     def log_summary(self, result: Mapping[str, Any], prefix: str = "summary", step: int | None = None) -> None:
         self.log({prefix: result} if prefix else result, step=step)
@@ -178,7 +189,7 @@ class Tracker:
     # ------------------------------------------------------------------ rich data (tabs beyond Metrics)
     def _log_object(self, key: str, make, step: int | None) -> None:
         if self.active:
-            self._guard(lambda: self._trackio.log({key: make(self._trackio)}, step=step))
+            self._guard(lambda: self._call("log", {key: make(self._trackio)}, step=step))
 
     def log_table(self, key: str, columns: list[str], rows: list[list[Any]], step: int | None = None) -> None:
         """A table in the Media & Tables tab."""
@@ -204,32 +215,30 @@ class Tracker:
     def alert(self, title: str, text: str | None = None, level: str = "warn") -> None:
         """An alert (info, warn or error) in the Reports tab, and a webhook if one is configured."""
         if self.active:
-            def call():
-                levels = getattr(self._trackio, "AlertLevel", None)
-                lvl = getattr(levels, level.upper(), level) if levels is not None else level
-                self._trackio.alert(title, text, level=lvl)
-
-            self._guard(call)
+            levels = getattr(self._trackio, "AlertLevel", None)
+            lvl = getattr(levels, level.upper(), level) if levels is not None else level
+            self._call("alert", title, text, level=lvl)
 
     def save_files(self, *globs: str) -> None:
         """Copy files (glob patterns) into the project's Files tab."""
         if self.active:
             for pattern in globs:
-                self._guard(lambda pattern=pattern: self._trackio.save(pattern))
+                self._guard(lambda pattern=pattern: self._trackio.save(pattern, project=self._project))
 
     def log_artifact(self, path, name: str | None = None, type: str | None = None,
                      aliases: list[str] | None = None) -> None:
         """A versioned artifact (a file or a directory such as a model export) in the Artifacts tab."""
         if self.active:
-            self._guard(lambda: self._trackio.log_artifact(path, name=name, type=type, aliases=aliases))
+            self._call("log_artifact", path, name=name, type=type, aliases=aliases)
 
     def finish(self) -> None:
         self._stop.set()
         if self._sampler is not None:
             self._sampler.join(timeout=5)
         if self.active:
-            self._guard(self._trackio.finish)
+            self._call("finish")
         self._trackio = None
+        self._run = None
 
     def __enter__(self) -> Self:
         return self

@@ -85,6 +85,20 @@ def apply(cfg: TrainConfig, move: dict, name: str, incumbent_dir: Path | None = 
     return new
 
 
+def _run_retrying(cfg: TrainConfig, labels_dir: Path, out: Path, attempts: int = 3) -> dict:
+    """``train.run``, retried when Metal drops a command buffer (another process's GPU fault can take this
+    one down with it); any other error propagates."""
+    for attempt in range(attempts):
+        try:
+            return run(cfg, labels_dir, out)
+        except RuntimeError as e:
+            if "METAL" not in str(e) or attempt == attempts - 1:
+                raise
+            print(f"climb: {cfg.name} hit a Metal error ({e}); retry {attempt + 1}")
+            time.sleep(30)
+    raise RuntimeError("unreachable")
+
+
 def _val_scores(model_dir: Path, val: list[dict]) -> tuple[list[float], dict]:
     from rh17m import bekko_mlx as B
 
@@ -149,7 +163,7 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
 
     try:
         from decision_mlx.tracking import Tracker
-        if not hasattr(Tracker, "log_table"):  # PRs #7-#10
+        if not hasattr(Tracker, "_call"):  # PRs #7-#11
             raise ImportError
     except ImportError:  # the local decision-mlx checkout predates those PRs
         from rh17m._tracking import Tracker
@@ -162,7 +176,7 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
         for sd in seeds:
             c = copy.deepcopy(cfg)
             c.seed, c.name, c.group, c.artifact = sd, f"{name}-s{sd}", f"climb-{stamp}", False
-            run(c, labels_dir, ROOT / "runs" / "train" / c.name)
+            _run_retrying(c, labels_dir, ROOT / "runs" / "train" / c.name)
             dirs.append(ROOT / "runs" / "train" / c.name / "model")
         return dirs
 

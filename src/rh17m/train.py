@@ -110,7 +110,7 @@ def _tracker(cfg: TrainConfig, extra: dict):
     """The MLX infra's Trackio tracker (decision_mlx.tracking, decision-mlx PRs #7-#10)."""
     try:
         from decision_mlx.tracking import Tracker
-        if not hasattr(Tracker, "log_table"):  # PRs #7-#10
+        if not hasattr(Tracker, "_call"):  # PRs #7-#11
             raise ImportError
     except ImportError:  # the local decision-mlx checkout predates them
         from rh17m._tracking import Tracker

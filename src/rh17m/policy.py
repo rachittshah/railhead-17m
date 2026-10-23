@@ -10,7 +10,17 @@ from rh17m.train import LAYOUTS, temper
 
 
 class ModelPolicy:
-    def __init__(self, model_dir: Path, layout: str = LAYOUTS[0]):
+    """Plays in its own process (closed loop, self-play). By default on the CPU: a 17M forward pass is cheap
+    there, and the GPU stays with training (two processes driving Metal at once can take the trainer down with
+    'Command buffer execution failed: ... victim of GPU error/recovery')."""
+
+    def __init__(self, model_dir: Path, layout: str = LAYOUTS[0], device: str | None = None):
+        import os
+
+        import mlx.core as mx
+
+        device = device or os.environ.get("RH17M_POLICY_DEVICE", "cpu")
+        mx.set_default_device(mx.cpu if device == "cpu" else mx.gpu)
         self.model_dir = Path(model_dir)
         self.model = B.load(str(model_dir), revision=None)
         meta = Path(model_dir) / "rh17m.json"
