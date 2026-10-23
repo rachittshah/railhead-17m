@@ -53,6 +53,7 @@ def coarse_moves() -> list[dict]:
         # Distillation over unlabelled train-map states: from the incumbent itself, and from the latest larger
         # teacher (runs/teachers/current, e.g. Bekko-68M trained on the same labels) when one exists.
         {"distill_from": "@incumbent", "distill_max": 1000},
+        {"distill_from": "@ensemble", "distill_max": 1000}, {"distill_from": "@ensemble", "distill_max": 3000},
         {"distill_from": "@teacher", "distill_max": 1000},
         {"distill_from": "@teacher", "distill_max": 4000},
     ]
@@ -67,21 +68,25 @@ def fine_moves(inc: TrainConfig) -> list[dict]:
 TEACHER = ROOT / "runs" / "teachers" / "current"
 
 
-def resolve_teacher(ref: str, incumbent_dir: Path | None) -> str | None:
-    """``@incumbent`` -> the incumbent's model dir, ``@teacher`` -> runs/teachers/current (a symlink to a
-    trained model dir); anything else is returned unchanged. None when the reference cannot be resolved."""
+def resolve_teacher(ref: str, incumbent_dir: Path | None, incumbent_seeds: list[Path] | None = None) -> str | None:
+    """``@incumbent`` -> the incumbent's model dir, ``@ensemble`` -> all its seed models (comma-separated, the
+    trainer averages them), ``@teacher`` -> runs/teachers/current (a symlink to a trained model dir); anything
+    else is returned unchanged. None when the reference cannot be resolved."""
     if ref == "@incumbent":
         return str(incumbent_dir) if incumbent_dir else None
+    if ref == "@ensemble":
+        return ",".join(str(d) for d in incumbent_seeds) if incumbent_seeds and len(incumbent_seeds) > 1 else None
     if ref == "@teacher":
         return str(TEACHER.resolve()) if TEACHER.exists() else None
     return ref
 
 
-def apply(cfg: TrainConfig, move: dict, name: str, incumbent_dir: Path | None = None) -> TrainConfig | None:
+def apply(cfg: TrainConfig, move: dict, name: str, incumbent_dir: Path | None = None,
+          incumbent_seeds: list[Path] | None = None) -> TrainConfig | None:
     new = copy.deepcopy(cfg)
     new.name = name
     if "distill_from" in move:
-        teacher = resolve_teacher(move["distill_from"], incumbent_dir)
+        teacher = resolve_teacher(move["distill_from"], incumbent_dir, incumbent_seeds)
         if teacher is None:
             return None
         move = {**move, "distill_from": teacher}
@@ -251,7 +256,7 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
             if runs >= max_runs:
                 break
             name = f"{stamp}-{phase}{i:02d}"
-            cfg = apply(inc_cfg, move, name, deploy)
+            cfg = apply(inc_cfg, move, name, deploy, inc_dirs)
             if cfg is None:  # e.g. no teacher trained yet
                 log({"run": name, "kind": phase, "move": move, "skipped": "unresolved"})
                 continue

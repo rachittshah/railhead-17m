@@ -53,6 +53,7 @@ class TrainConfig:
     distill_from: str = ""  # teacher (run model dir or release name) that soft-labels unlabelled train states
     distill_max: int = 0  # cap on teacher-labelled examples (0 = all available)
     distill_temperature: float = 1.0  # extra temperature on the teacher's probabilities
+    obs_dir: str = "obs-v3"  # unlabelled observations for distillation, under the labels dir's parent
     freeze_embeddings: bool = False  # keep the token embeddings at their pretrained values
     freeze_layers: int = 0  # freeze the first N encoder layers (-1: the whole encoder, train the heads only)
     select_metric: str = "exp_regret"  # val metric that picks the epoch (exp_regret | play_regret | regret | nll)
@@ -178,17 +179,25 @@ def _run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
     if cfg.distill_from:
         from rh17m.dataset import load_observations
 
-        teacher = _load(cfg.distill_from)
-        meta = Path(cfg.distill_from) / "rh17m.json"
-        t_temp = (json.loads(meta.read_text())["temperature"] if meta.exists() else 1.0) * cfg.distill_temperature
-        unl = load_observations(Path(labels_dir).parent / "obs", dcfg, exclude={e["id"] for e in exs})
+        unl = load_observations(Path(labels_dir).parent / cfg.obs_dir, dcfg, exclude={e["id"] for e in exs})
         if cfg.distill_max:
             unl = rng.sample(unl, min(cfg.distill_max, len(unl)))
-        for e, p in zip(unl, predict(teacher, unl, t_temp), strict=True):
+        # A comma-separated teacher is an ensemble: its members' (tempered) probabilities are averaged.
+        members = [t for t in cfg.distill_from.split(",") if t]
+        avg: list[dict[str, float]] = [dict.fromkeys(dict(e["options"]), 0.0) for e in unl]
+        for t in members:
+            teacher = _load(t)
+            meta = Path(t) / "rh17m.json"
+            t_temp = (json.loads(meta.read_text())["temperature"] if meta.exists() else 1.0) * cfg.distill_temperature
+            for acc, p in zip(avg, predict(teacher, unl, t_temp), strict=True):
+                for k, v in p.items():
+                    acc[k] += v / len(members)
+            del teacher
+            clear_mlx_cache()
+        for e, p in zip(unl, avg, strict=True):
             e["target"] = p
         train = train + unl
         n_distill = len(unl)
-        del teacher
     mx.random.seed(cfg.seed)
     model = _load(cfg.init)
     tok = model.tokenizer

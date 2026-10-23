@@ -32,3 +32,9 @@ def test_control_move_changes_nothing():
     base = TrainConfig(data={"tau": 0.05}, lr=2e-4)
     same = apply(base, CONTROL, "c")
     assert same.data == base.data and same.lr == base.lr and same.name == "c"
+
+
+def test_ensemble_teacher_joins_the_seed_models():
+    seeds = [Path("/a"), Path("/b"), Path("/c")]
+    assert resolve_teacher("@ensemble", Path("/a"), seeds) == "/a,/b,/c"
+    assert resolve_teacher("@ensemble", Path("/a"), [Path("/a")]) is None
