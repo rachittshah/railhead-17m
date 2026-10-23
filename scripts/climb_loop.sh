@@ -7,7 +7,7 @@ cd "${0:A:h}/.."
 R=.venv/bin/rh17m
 GROWTH=${GROWTH:-1.25}
 MIN_VAL=${MIN_VAL:-40}
-last=0
+last=$(cat runs/climb/last_n 2>/dev/null || echo 0)  # persisted, so a restart does not redo a pass
 count() { .venv/bin/python -I -c "
 import sys; sys.path.insert(0, 'src')
 from pathlib import Path
@@ -38,6 +38,7 @@ while [[ ! -f data/labels/.stop ]]; do
         --workers 3 --seed0 $(( $(date +%s) % 100000 )) >> data/logs/dagger.log 2>&1
     fi
     last=$n
+    echo $n > runs/climb/last_n
   fi
   sleep 600
 done
