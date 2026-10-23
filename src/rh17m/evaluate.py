@@ -93,10 +93,25 @@ def _biggest_affordable(ex: dict) -> dict[str, float]:
     return _onehot(ex, max(aff, key=lambda k: aff[k]["pop_min"]) if aff else "hold")
 
 
+def _graded(ex: dict, key, top: str | None = None) -> dict[str, float]:
+    """Probabilities that rank routes by ``key`` (largest first; ``top`` first if given) and hold last: the
+    argmax is the scripted pick, and the order is its fallback when a build fails."""
+    keys = sorted(ex["features"], key=lambda k: (k != top, -key(ex["features"][k])))
+    n = len(keys)
+    raw = {k: float(n - i) for i, k in enumerate(keys)}
+    raw["hold"] = 0.0 if n else 1.0
+    z = sum(raw.values())
+    return {k: v / z for k, v in raw.items()}
+
+
+def _longest(ex: dict) -> dict[str, float]:
+    return _graded(ex, lambda f: f["length"]) if ex["features"] else _onehot(ex, "hold")
+
+
 BASELINES: dict[str, Policy] = {
     "uniform": lambda ex: {k: 1.0 / len(ex["options"]) for k, _ in ex["options"]},
     "hold": lambda ex: _onehot(ex, "hold"),
-    "longest": lambda ex: _onehot(ex, max(ex["features"], key=lambda k: ex["features"][k]["length"])),
+    "longest": _longest,
     "longest_affordable": _longest_affordable,
     "biggest_affordable": _biggest_affordable,
     "oracle": lambda ex: _onehot(ex, ex["best"]),

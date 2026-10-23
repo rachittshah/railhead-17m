@@ -46,12 +46,32 @@ def wakeup_observation(world: World, task: TaskSpec, end_date: int, max_air: int
     return observation(render_state(snap, routes, cands), cand_dicts, money0, dcfg), cands
 
 
+PLAYER_V = "play-v2"  # v2: on a failure that spent nothing, try the next option; failed routes are blocked
+
+
+def wakeup_options(obs: dict, blocked: set[str]) -> dict:
+    """The observation without routes that already failed in this game (a reloaded game would offer them
+    again, and a deterministic policy would pick them again)."""
+    if not blocked:
+        return obs
+    return {**obs, "options": [(k, t) for k, t in obs["options"] if k not in blocked],
+            "features": {k: f for k, f in obs["features"].items() if k not in blocked}}
+
+
 def play(task_id: str, policy: Policy, seed: int, wake_days: int = 90, max_air: int = LabelConfig.max_air,
-         dcfg: DatasetConfig = DatasetConfig()) -> dict:
+         dcfg: DatasetConfig = DatasetConfig(), max_tries: int = 3) -> dict:
+    """Play one game. At each wake-up the options are ranked by the policy's probabilities (ties broken at
+    random); the first is built, and when a build fails without spending anything (no site, type not
+    available, no cash) the next is tried, up to ``max_tries``, stopping at ``hold``. Failed routes are
+    blocked for the rest of the game. Every policy, scripted or learned, plays under these rules."""
+    import random
+
     task_dir = find_task(task_id)
     task = TaskSpec.load(task_dir)
+    rng = random.Random(seed)
     t0 = time.perf_counter()
     decisions, curve = [], []
+    blocked: set[str] = set()
     with tempfile.TemporaryDirectory(prefix="rh17m-play-") as tmp:
         world = World.load(Path(tmp) / "w", task_dir / "start.sav")
         try:
@@ -60,16 +80,26 @@ def play(task_id: str, policy: Policy, seed: int, wake_days: int = 90, max_air: 
             policy_s = 0.0
             while int(world.state()["date"]) < end_date:
                 obs, cands = wakeup_observation(world, task, end_date, max_air, dcfg)
+                obs = wakeup_options(obs, blocked)
                 t1 = time.perf_counter()
                 probs = policy(obs)
                 policy_s += time.perf_counter() - t1
-                pick = max(probs, key=lambda k: (probs[k], k == HOLD))
-                rec = {"date": world.state()["ymd"], "pick": pick, "p": round(probs[pick], 4),
-                       "options": len(obs["options"])}
-                if pick != HOLD:
-                    c = next(c for c in cands if c.candidate_id == pick)
+                order = sorted(probs, key=lambda k: (-probs[k], k != HOLD, rng.random()))
+                rec = {"date": world.state()["ymd"], "pick": order[0], "p": round(probs[order[0]], 4),
+                       "options": len(obs["options"]), "tries": []}
+                for key in order[:max_tries]:
+                    if key == HOLD:
+                        break
+                    c = next(c for c in cands if c.candidate_id == key)
                     br, used = build_affordable(world, c.a["id"], c.b["id"])
-                    rec.update(ok=br.ok, cost=br.cost, ladder=list(used), failed=br.failed_step)
+                    rec["tries"].append({"key": key, "ok": br.ok, "cost": br.cost, "ladder": list(used),
+                                         "failed": br.failed_step})
+                    if br.ok or br.cost or br.steps:  # built, or spent money: this wake-up's decision is made
+                        rec.update(pick=key, ok=br.ok, cost=br.cost, ladder=list(used), failed=br.failed_step)
+                        if not br.ok:
+                            blocked.add(key)
+                        break
+                    blocked.add(key)
                 decisions.append(rec)
                 days = min(wake_days, end_date - int(world.state()["date"]))
                 world.step(days=max(days, 1))
@@ -81,9 +111,9 @@ def play(task_id: str, policy: Policy, seed: int, wake_days: int = 90, max_air: 
         finally:
             world.close()
     obj = task.objective
-    return {"task": task_id, "seed": seed, "final_nw": final,
+    return {"task": task_id, "seed": seed, "player": PLAYER_V, "final_nw": final,
             "score": tycoon_log(final, obj["w_idle"], obj["w_base"]),
-            "builds": sum(1 for d in decisions if d["pick"] != HOLD),
+            "builds": sum(len(d["tries"]) for d in decisions),
             "built_ok": sum(1 for d in decisions if d.get("ok")), "decisions": decisions, "curve": curve,
             "policy_s": round(policy_s, 2), "wall_s": round(time.perf_counter() - t0, 1)}
 
