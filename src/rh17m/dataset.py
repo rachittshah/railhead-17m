@@ -15,6 +15,7 @@ Splits are by map: arena-dev-* maps are the held-out ``test`` split; ``VAL_MAPS`
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import dataclass
@@ -38,11 +39,15 @@ class DatasetConfig:
 
 
 def map_split(task_id: str) -> str:
+    """test = dev maps, ood = ood maps, val = VAL_MAPS plus a fixed eighth of the other train maps (by hash,
+    so the choice never depends on what has been labelled), train = the rest."""
     if "-dev-" in task_id:
         return "test"
     if "-ood-" in task_id:
         return "ood"
-    return "val" if task_id in VAL_MAPS else "train"
+    if task_id in VAL_MAPS or int(hashlib.sha256(task_id.encode()).hexdigest()[:8], 16) % 8 == 0:
+        return "val"
+    return "train"
 
 
 RUNOFF_DAYS = 365

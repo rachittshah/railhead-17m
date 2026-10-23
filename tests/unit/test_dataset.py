@@ -76,3 +76,10 @@ def test_rank_features_name_the_longest_route():
     ex = build_example(rec, DatasetConfig(ranks=True))
     text = dict(ex["options"])
     assert "2nd longest" in text["a"] and "1st longest" in text["b"] and "of 2 routes" in text["b"]
+
+
+def test_val_holds_out_a_fixed_share_of_train_maps():
+    ids = [f"tycoon-train-{i:04d}" for i in range(400)]
+    share = sum(map_split(t) == "val" for t in ids) / len(ids)
+    assert 0.08 < share < 0.18
+    assert map_split("arena-train-0201") == map_split("arena-train-0201")
