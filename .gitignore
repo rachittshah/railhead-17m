@@ -11,3 +11,5 @@ checkpoints/
 .env
 .build-done
 data/
+runs/train/*/model/
+runs/play/*/
