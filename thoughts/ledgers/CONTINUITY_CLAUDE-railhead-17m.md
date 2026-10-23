@@ -55,7 +55,12 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
         only 24% of wake-ups; ERR_NO_SITE repeats). v1 games archived in runs/play-v1
   - [x] decision-mlx PR #11: Tracker logs via its own Run (nested trackers); policy inference on CPU; climb
         retries Metal errors (pass-2 crash: 'victim of GPU error/recovery')
-- Now: [→] climb pass 2 (13:46, 421 ex, 90 val); play-v2 window re-running baselines + incumbent on 11 dev maps
+  - [x] play_regret metric (offline replay of player v2); climb keep metric = play_regret from pass 3
+  - [x] Freezing moves (embeddings 12.9M of 16.8M; +3 layers; head-only) and select_metric moves
+  - [x] MLX cache capped at 2 GB + cleared per run: climb had 21.6 GB cached (31.8 GB GPU alloc) -> swap,
+        load 200, labels 360-460 s/state; after fix labels recovered (~60/h -> ~157/h and rising)
+  - Climb predictions cached per (model, example text)
+- Now: [→] climb pass 3 (play_regret, 2 seeds, ~435 ex); play-v2 window: baselines + incumbent, 11 dev maps
 - Open: UNCONFIRMED flaky unit test (1 failure once under heavy load, not reproduced in 4 runs)
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
 - Remaining:
