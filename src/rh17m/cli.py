@@ -26,10 +26,11 @@ def _states(a: argparse.Namespace) -> int:
         for t in a.tasks:
             print(json.dumps(S.start_state(t, root).__dict__))
     elif a.source == "selfplay":
-        for t in a.tasks:
-            for seed in range(a.seed0, a.seed0 + a.games):
-                got = S.selfplay(t, root, seed, policy=a.policy, max_states=a.max_states)
-                print(json.dumps({"task": t, "seed": seed, "states": len(got)}), flush=True)
+        tasks = a.tasks or sorted(p.name for p in S.TASKS_ROOT.glob("arena-*-02*"))
+        policies = ["random", "longest", "mix"] if a.policy == "all" else [a.policy]
+        for r in S.selfplay_many(tasks, root, list(range(a.seed0, a.seed0 + a.games)), policies,
+                                 max_states=a.max_states, workers=a.workers):
+            print(json.dumps(r), flush=True)
     return 0
 
 
@@ -51,7 +52,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("source", choices=["teacher", "start", "selfplay"])
     s.add_argument("--root", default=str(DATA / "states"))
     s.add_argument("--tasks", nargs="*", default=[])
-    s.add_argument("--policy", default="mix", choices=["mix", "random", "longest"])
+    s.add_argument("--policy", default="all", choices=["all", "mix", "random", "longest"])
+    s.add_argument("--workers", type=int, default=6)
     s.add_argument("--games", type=int, default=1)
     s.add_argument("--seed0", type=int, default=1)
     s.add_argument("--max-states", type=int, default=30)

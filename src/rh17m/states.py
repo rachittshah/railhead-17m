@@ -168,6 +168,25 @@ def selfplay(task_id: str, root: Path, seed: int, policy: str = "mix", max_state
     return out
 
 
+def _selfplay_job(args: tuple) -> dict:
+    task_id, root, seed, policy, max_states = args
+    try:
+        got = selfplay(task_id, Path(root), seed, policy=policy, max_states=max_states)
+        return {"task": task_id, "seed": seed, "policy": policy, "states": len(got)}
+    except Exception as e:  # a crashed game loses its own states only
+        return {"task": task_id, "seed": seed, "policy": policy, "error": repr(e)}
+
+
+def selfplay_many(task_ids: list[str], root: Path, seeds: list[int], policies: list[str],
+                  max_states: int = 30, workers: int = 6) -> Iterator[dict]:
+    """Every (task, seed, policy) game, ``workers`` at a time; yields one summary per finished game."""
+    import multiprocessing as mp
+
+    jobs = [(t, str(root), s, p, max_states) for s in seeds for p in policies for t in task_ids]
+    with mp.get_context("spawn").Pool(workers) as pool:
+        yield from pool.imap_unordered(_selfplay_job, jobs)
+
+
 def start_state(task_id: str, root: Path, tasks_root: Path = TASKS_ROOT) -> StateMeta:
     task_dir = tasks_root / task_id
     task = TaskSpec.load(task_dir)
