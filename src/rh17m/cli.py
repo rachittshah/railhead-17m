@@ -76,6 +76,33 @@ def _baselines(a: argparse.Namespace) -> int:
     return 0
 
 
+def _train(a: argparse.Namespace) -> int:
+    from rh17m.train import TrainConfig, run
+
+    cfg = TrainConfig(name=a.name)
+    for kv in a.set:
+        k, v = kv.split("=", 1)
+        if k.startswith("data."):
+            cfg.data[k[5:]] = json.loads(v)
+        else:
+            cur = getattr(cfg, k)
+            setattr(cfg, k, tuple(json.loads(v)) if isinstance(cur, tuple) else type(cur)(json.loads(v)))
+    res = run(cfg, Path(a.labels), Path(a.out) / a.name)
+    print(json.dumps({k: res[k] for k in res if not k.endswith("_baselines")}, indent=1))
+    return 0
+
+
+def _play(a: argparse.Namespace) -> int:
+    from rh17m.play import tournament
+
+    tasks = a.tasks
+    for r in tournament(tasks, a.policies, list(range(a.seed0, a.seed0 + a.seeds)), Path(a.out),
+                        wake_days=a.wake_days, workers=a.workers, model_dir=a.model):
+        print(json.dumps({k: r[k] for k in ("policy", "task", "seed", "final_nw", "score", "builds", "built_ok")}),
+              flush=True)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(prog="rh17m")
@@ -111,6 +138,24 @@ def main(argv: list[str] | None = None) -> int:
     bl.add_argument("--labels", default=str(DATA / "labels"))
     bl.add_argument("--out", default="")
     bl.set_defaults(fn=_baselines)
+
+    tr = sub.add_parser("train", help="fine-tune the 17M model on the labelled decisions")
+    tr.add_argument("--name", required=True)
+    tr.add_argument("--labels", default=str(DATA / "labels"))
+    tr.add_argument("--out", default=str(Path(__file__).resolve().parents[2] / "runs" / "train"))
+    tr.add_argument("--set", nargs="*", default=[], help="TrainConfig overrides key=json, data.<key>=json")
+    tr.set_defaults(fn=_train)
+
+    pl = sub.add_parser("play", help="closed-loop games: policies x tasks x seeds")
+    pl.add_argument("--tasks", nargs="+", required=True)
+    pl.add_argument("--policies", nargs="+", default=["hold", "longest", "random"])
+    pl.add_argument("--model", default=None)
+    pl.add_argument("--seeds", type=int, default=1)
+    pl.add_argument("--seed0", type=int, default=1)
+    pl.add_argument("--wake-days", type=int, default=90)
+    pl.add_argument("--workers", type=int, default=4)
+    pl.add_argument("--out", default=str(Path(__file__).resolve().parents[2] / "runs" / "play"))
+    pl.set_defaults(fn=_play)
 
     b = sub.add_parser("bench", help="simulator throughput")
     b.add_argument("rest", nargs=argparse.REMAINDER)
