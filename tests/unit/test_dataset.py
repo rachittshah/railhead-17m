@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from rh17m.dataset import DatasetConfig, build_example, map_split, option_values, soft_target
+from rh17m.dataset import DatasetConfig, build_example, map_split, option_values, soft_target, value_chunk
 
 
 def _record(values: dict[str, list[int]], money0: int = 500_000, costs: dict[str, int] | None = None) -> dict:
@@ -57,3 +57,15 @@ def test_map_split_holds_out_validation_maps():
     assert map_split("arena-dev-0212") == "test"
     assert map_split("arena-train-0228") == "val"
     assert map_split("arena-train-0201") == "train"
+
+
+def test_late_states_are_valued_at_the_end_of_the_game():
+    rec = _record({"a": [1, 2], "hold": [3, 4]})
+    for o in rec["outcomes"].values():
+        for r in o["rollouts"]:
+            r["nw"] = [10, 20, 30, 40, 50, 60, 70, 80]
+    rec["config"] = {"chunk_days": 91}
+    rec["state"].update(date=1000, end_date=1000)  # only the run-off year is left: 365 days = 5 chunks
+    assert value_chunk(rec) == 4
+    rec["state"].update(date=0, end_date=5000)
+    assert value_chunk(rec) == 7

@@ -43,11 +43,25 @@ def map_split(task_id: str) -> str:
     return "val" if task_id in VAL_MAPS else "train"
 
 
+RUNOFF_DAYS = 365
+
+
+def value_chunk(rec: dict) -> int:
+    """Index of the rollout chunk at which the option is valued: the end of the rollout, or the end of the
+    game (horizon plus run-off year) when that comes first, because the arena scores net worth there."""
+    chunk_days = int(rec.get("config", {}).get("chunk_days", 91))
+    n = len(next(iter(rec["outcomes"].values()))["rollouts"][0]["nw"])
+    st = rec["state"]
+    left = int(st["end_date"]) + RUNOFF_DAYS - int(st["date"])
+    return max(0, min(n, math.ceil(left / chunk_days)) - 1)
+
+
 def option_values(rec: dict, cfg: DatasetConfig) -> tuple[dict[str, float], dict[str, float]]:
-    """Mean and standard error over seeds of asinh(final net worth / scale), per option."""
+    """Mean and standard error over seeds of asinh(net worth / scale) at ``value_chunk``, per option."""
     q, se = {}, {}
+    at = value_chunk(rec)
     for key in rec["options"]:
-        vals = [math.asinh(r["nw"][-1] / cfg.scale) for r in rec["outcomes"][key]["rollouts"]]
+        vals = [math.asinh(r["nw"][at] / cfg.scale) for r in rec["outcomes"][key]["rollouts"]]
         m = sum(vals) / len(vals)
         q[key] = m
         se[key] = (math.sqrt(sum((v - m) ** 2 for v in vals) / (len(vals) - 1) / len(vals))
