@@ -272,9 +272,13 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
             diff, lo, hi = bootstrap_diff(a, b)
             keep = diff < -noise and hi < 0 and "_control" not in move
             if "_control" in move:
+                # The A/A control measures the run-to-run variation the seed spread misses (training is not
+                # bit-deterministic, and labels keep arriving between runs): from here on a move must beat it.
+                seed_noise, noise = noise, max(noise, abs(diff))
                 tracker.alert(f"A/A control: diff {diff:+.4f} [{lo:+.4f}, {hi:+.4f}]",
-                              "the unchanged config retrained now vs the incumbent; |diff| beyond noise means bias",
+                              f"keep threshold now {noise:.4f} (seed-based {seed_noise:.4f})",
                               level="info" if lo <= 0 <= hi else "warn")
+                log({"kind": "control_threshold", "run": name, "seed_noise": seed_noise, "noise": noise})
             log({"run": name, "kind": phase, "move": move, "metric": METRIC, "val": ma, "incumbent_val": mb,
                  "diff": diff, "diff_exp_regret": diff,
                  "ci": [lo, hi], "noise": noise, "kept": keep, "n_val": len(ids), "seeds": list(seeds)})
