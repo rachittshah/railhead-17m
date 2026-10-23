@@ -40,12 +40,13 @@ HOLD = "hold"
 
 @dataclass(frozen=True)
 class LabelConfig:
-    seeds: int = 3
+    seeds: int = 3  # val/test/ood states: evaluation needs the tighter values
+    train_seeds: int = 2  # train states: a third fewer rollouts; common random numbers keep differences tight
     chunk_days: int = 91
     chunks: int = 8  # 728 days: about two years, long enough for an air route to pay back
     max_air: int = 8
     planes: int = 2
-    version: str = "lbl-v2.2"  # v2.1: plane per candidate; v2.2: NO_SITE ladder step, no-build skip
+    version: str = "lbl-v2.3"  # v2.1 plane per candidate; v2.2 NO_SITE ladder, no-build skip; v2.3 2 train seeds
 
 
 # How a chosen route is built: the first configuration the company can pay for. A large airport with two
@@ -126,7 +127,9 @@ def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig()) -> 
     meta = load_meta(root, state_id)
     task = TaskSpec.load(find_task(meta.task_id))
     t0 = time.perf_counter()
-    seeds = rollout_seeds(state_id, cfg.seeds)
+    from rh17m.dataset import map_split
+
+    seeds = rollout_seeds(state_id, cfg.train_seeds if map_split(meta.task_id) == "train" else cfg.seeds)
     with tempfile.TemporaryDirectory(prefix="rh17m-label-") as tmp:
         tmp = Path(tmp)
         parent = World.load(tmp / "parent", Path(root) / f"{state_id}.sav")
