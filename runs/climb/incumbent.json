@@ -1,7 +1,9 @@
 {
  "config": {
-  "name": "1023-1209-base-s2",
-  "data": {},
+  "name": "1023-1606-coarse02",
+  "data": {
+   "tau": 0.1
+  },
   "init": "bekko",
   "epochs": 8,
   "batch_size": 16,
@@ -14,12 +16,14 @@
    "instruction_state",
    "state_instruction"
   ],
-  "seed": 2,
+  "seed": 1,
   "pad_multiple": 64,
   "compile": true,
   "bf16": true,
   "track": true,
-  "group": "climb-1023-1209",
+  "artifact": false,
+  "n_traces": 20,
+  "group": "climb-1023-1242",
   "log_every": 5,
   "train_splits": [
    "train"
@@ -27,11 +31,30 @@
   "max_train": 0,
   "distill_from": "",
   "distill_max": 0,
-  "distill_temperature": 1.0
+  "distill_temperature": 1.0,
+  "obs_dir": "obs-v3",
+  "freeze_embeddings": false,
+  "freeze_layers": 0,
+  "select_metric": "exp_regret",
+  "patience": 3
  },
- "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-1209-base-s2/model",
+ "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-1606-coarse02-s1/model",
  "val": {
-  "exp_regret": 0.3154729179149339
+  "regret": 0.23326536510302556,
+  "exp_regret": 0.28428664708960133,
+  "capture": 0.16697789994076642,
+  "hit": 0.3177083333333333,
+  "nll": 2.168168419216853,
+  "conf": 0.15075978977988128,
+  "pick_hold": 0.0,
+  "play_regret": 0.21265529661468985,
+  "ece": 0.1679468832824105,
+  "n": 128.0
  },
- "saved": "2026-10-23 12:10:45"
+ "seed_dirs": [
+  "/Users/rachitt/railhead-17m/runs/train/1023-1606-coarse02-s0/model",
+  "/Users/rachitt/railhead-17m/runs/train/1023-1606-coarse02-s1/model",
+  "/Users/rachitt/railhead-17m/runs/train/1023-1606-coarse02-s2/model"
+ ],
+ "saved": "2026-10-23 16:27:10"
 }
