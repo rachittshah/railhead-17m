@@ -49,6 +49,7 @@ def coarse_moves() -> list[dict]:
         # What the model reads.
         {"data": {"ranks": True}}, {"data": {"plane": True}}, {"data": {"features": False}},
         {"data": {"drop_candidate_table": False}}, {"data": {"expansions": False}},
+        {"data": {"continuation": "expand"}}, {"data": {"continuation": "hold"}},
         {"data": {"min_spread": 0.05}}, {"data": {"min_spread": 0.1}},
         {"data": {"scale": 1_000_000.0}}, {"data": {"scale": 20_000.0}},
         # Optimiser and targets.

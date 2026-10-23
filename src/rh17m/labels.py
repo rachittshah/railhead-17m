@@ -27,6 +27,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from railhead.actions import to_gs
 from railhead.bridge import BridgeError
 from railhead.task import TaskSpec
 from railhead.world import World
@@ -47,8 +48,13 @@ class LabelConfig:
     chunks: int = 8  # 728 days: about two years, long enough for an air route to pay back
     max_air: int = 8
     max_expand: int = 3  # expansion options: add planes to the most profitable existing air routes
+    # What the company does after the option, inside each rollout. "hold" does nothing, which values only the
+    # option's own two years and undervalues new routes (no later planes on them). "expand" adds one plane to
+    # the most profitable air route every ``continue_every`` days when cash allows (no site searches: cheap).
+    continuation: str = "expand"
+    continue_every: int = 182
     planes: int = 2
-    version: str = "lbl-v3"  # v2.x: route options only; v3: + expansion options (add planes to existing routes)
+    version: str = "lbl-v4"  # v2.x: routes only; v3: + expansion options; v4: "expand" continuation in rollouts
 
 
 # How a chosen route is built: the first configuration the company can pay for. A large airport with two
@@ -104,19 +110,47 @@ def _net_worth(world: World) -> tuple[int, int]:
     return money - int(c.get("loan") or 0), money
 
 
+def continue_expand(world: World) -> bool:
+    """One continuation step: clone the most profitable air plane (shared orders) into the hangar nearest to
+    it. Returns whether a plane was added; a refusal (cash, hangar) is not an error."""
+    planes = [v for v in world.call("vehicles") if v.get("vtype") == "air" and int(v.get("profit_last_year") or 0) > 0]
+    if not planes:
+        return False
+    best = max(planes, key=lambda v: (int(v.get("profit_last_year") or 0), int(v.get("profit_this_year") or 0)))
+    hangars = [d for d in world.call("depots") if d.get("vtype") == "air"]
+    if not hangars:
+        return False
+    h = min(hangars, key=lambda d: abs(int(d["x"]) - int(best.get("x") or 0)) + abs(int(d["y"]) - int(best.get("y") or 0)))
+    try:
+        method, args = to_gs("vehicle.clone", {"depot_tile": int(h["tile"]), "vehicle": int(best["id"]),
+                                               "share_orders": True})
+        vid = int(world.call(method, **args).get("vehicle", -1))
+        if vid < 0:
+            return False
+        method, args = to_gs("vehicle.start", {"vehicle": vid})
+        world.call(method, **args)
+        return True
+    except BridgeError:
+        return False
+
+
 def _rollout(save: Path, workdir: Path, seed: int, cfg: LabelConfig, chunks: int | None = None) -> dict:
     world = World.load(workdir, save)
     try:
         out = world.admin.rcon(f"reseed {seed & 0xFFFFFFFF}")
         if not out or not out[0].startswith("Reseeded"):
             raise RuntimeError(f"engine lacks the reseed patch: {out!r}")
-        nw, money = [], []
-        for _ in range(cfg.chunks if chunks is None else chunks):
+        nw, money, added = [], [], 0
+        every = max(1, cfg.continue_every // cfg.chunk_days)
+        n = cfg.chunks if chunks is None else chunks
+        for i in range(n):
             world.step(days=cfg.chunk_days)
             a, b = _net_worth(world)
             nw.append(a)
             money.append(b)
-        return {"nw": nw, "money": money}
+            if cfg.continuation == "expand" and (i + 1) % every == 0 and i + 1 < n:
+                added += continue_expand(world)
+        return {"nw": nw, "money": money, "continued": added}
     finally:
         world.close()
 

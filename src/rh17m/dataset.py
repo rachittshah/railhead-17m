@@ -37,6 +37,7 @@ class DatasetConfig:
     ranks: bool = False  # add each option's rank among the options (length, smaller town, cost)
     plane: bool = False  # name the fastest eligible plane with its speed and capacity (labels from lbl-v2.1)
     expansions: bool = True  # offer "add planes to an existing route" options (labels from lbl-v3)
+    continuation: str = "any"  # use only labels rolled out under this continuation ("hold", "expand"; "any")
 
 
 def map_split(task_id: str) -> str:
@@ -153,6 +154,8 @@ def observation(rendered_state: dict, candidates: list[dict], money0: int, cfg: 
 
 def build_example(rec: dict, cfg: DatasetConfig) -> dict | None:
     if rec.get("uninformative"):
+        return None
+    if cfg.continuation != "any" and rec.get("config", {}).get("continuation", "hold") != cfg.continuation:
         return None
     q, se = option_values(rec, cfg)
     if max(q.values()) - min(q.values()) < cfg.min_spread:
