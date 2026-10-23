@@ -50,8 +50,13 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   - [x] Labels lbl-v2.4: train states 1 seed (CRN), eval splits 3; labellers train x14, val x5, test+ood x3
   - [x] DAgger: model self-play policy (epsilon 0.2); climb loop runs it after each pass; labelled first
   - Incumbent 1023-1209-base-s2 on arena-dev-0003: £4.69M (0.892) vs longest £4.09M (0.858)
-- Now: [→] climb loop waits for 25% more examples (last_n in runs/climb/last_n); postpass window: closed
-  loop of the incumbent on 11 dev maps, tracked play report, DAgger self-play
+  - [x] Climb fix: seed-matched, seed-averaged comparisons (old rule compared to best-of-seeds incumbent)
+  - [x] Player v2: fall back to next option on a no-spend failure, block failed routes (v1 model built OK on
+        only 24% of wake-ups; ERR_NO_SITE repeats). v1 games archived in runs/play-v1
+  - [x] decision-mlx PR #11: Tracker logs via its own Run (nested trackers); policy inference on CPU; climb
+        retries Metal errors (pass-2 crash: 'victim of GPU error/recovery')
+- Now: [→] climb pass 2 (13:46, 421 ex, 90 val); play-v2 window re-running baselines + incumbent on 11 dev maps
+- Open: UNCONFIRMED flaky unit test (1 failure once under heavy load, not reproduced in 4 runs)
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
 - Remaining:
   - [ ] Closed-loop player (17M picks routes in full games) + paired eval on dev maps
