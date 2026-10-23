@@ -69,3 +69,10 @@ def test_late_states_are_valued_at_the_end_of_the_game():
     assert value_chunk(rec) == 4
     rec["state"].update(date=0, end_date=5000)
     assert value_chunk(rec) == 7
+
+
+def test_rank_features_name_the_longest_route():
+    rec = _record({"a": [2_000_000] * 2, "b": [150_000] * 2, "hold": [100_000] * 2})
+    ex = build_example(rec, DatasetConfig(ranks=True))
+    text = dict(ex["options"])
+    assert "2nd longest" in text["a"] and "1st longest" in text["b"] and "of 2 routes" in text["b"]

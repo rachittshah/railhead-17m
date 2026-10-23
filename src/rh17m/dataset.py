@@ -33,6 +33,7 @@ class DatasetConfig:
     min_spread: float = 1e-3
     features: bool = True  # describe affordability and the money left after the build in each option
     drop_candidate_table: bool = True  # the options already describe the candidates
+    ranks: bool = False  # add each option's rank among the options (length, smaller town, cost)
 
 
 def map_split(task_id: str) -> str:
@@ -93,11 +94,35 @@ def describe(c: dict, money0: int, features: bool) -> str:
     return text
 
 
+_ORD = {1: "1st", 2: "2nd", 3: "3rd"}
+
+
+def _ordinal(n: int) -> str:
+    return _ORD.get(n, f"{n}th")
+
+
+def rank_text(candidates: list[dict], i: int) -> str:
+    """Where candidate ``i`` stands among the offered routes: longest, largest smaller town, cheapest."""
+    def rank(key, reverse: bool) -> int:
+        vals = sorted((key(c) for c in candidates), reverse=reverse)
+        return vals.index(key(candidates[i])) + 1
+
+    def pop(c):
+        return min(int(c["a"].get("population") or 0), int(c["b"].get("population") or 0))
+
+    n = len(candidates)
+    return (f"{_ordinal(rank(lambda c: c['length_tiles'], True))} longest, "
+            f"{_ordinal(rank(pop, True))} largest towns, "
+            f"{_ordinal(rank(lambda c: c['estimated_cost'], False))} cheapest of {n} routes")
+
+
 def observation(rendered_state: dict, candidates: list[dict], money0: int, cfg: DatasetConfig) -> dict:
     """What a policy sees at a wake-up: the state text, the question and the options, plus the scripted
     baselines' features. The training examples and the online player both build it here, so the model reads
     the same text offline and in play."""
     options = [(c["candidate_id"], describe(c, money0, cfg.features)) for c in candidates]
+    if cfg.ranks and candidates:
+        options = [(k, f"{text}; {rank_text(candidates, i)}") for i, (k, text) in enumerate(options)]
     options.append((HOLD, "build nothing now and keep the cash"))
     state = dict(rendered_state)
     if cfg.drop_candidate_table:
