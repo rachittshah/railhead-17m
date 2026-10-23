@@ -38,8 +38,13 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   - [x] Val = 3 local maps + hashed 1/8 of train maps (17 maps); 4,604 states harvested
   - Early signal (51 ex): best option is rarely the longest (2/50) or hold (1/51); mostly 2nd-4th longest;
     median best-worst spread 0.275 asinh
-- Now: [→] accumulate labels (val needs ≥40 examples), then first real run + climb; baseline games
-  running (tmux play-base, runs/play/baselines-w180)
+  - [x] decision-mlx PRs #8/#9 merged: Apple GPU util/memory (ioreg), MLX memory, host CPU/RAM sampled into
+        Trackio System Metrics via the Run object (ContextVar bug fixed); rh17m samples every 2 s
+  - [x] Closed-loop baselines, 11 dev maps, wake 180 d: random 0.689, longest 0.490, longest_affordable
+        0.099, hold 0.000 (runs/play/summary.json)
+  - [x] Harvest complete: 5,119 states, all observed (data/obs) for distillation
+- Now: [→] climb loop (tmux rh17m:climb) runs a pass each time examples grow 25% (val ≥ 40 reached 12:00);
+  labellers: train x10, val x8, test+ood x4 (CPU saturated, ~240 labels/h)
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
 - Remaining:
   - [ ] Closed-loop player (17M picks routes in full games) + paired eval on dev maps
