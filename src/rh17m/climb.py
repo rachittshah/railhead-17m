@@ -105,12 +105,27 @@ def _run_retrying(cfg: TrainConfig, labels_dir: Path, out: Path, attempts: int =
 METRIC = "exp_regret"  # the climb's keep metric; `rh17m climb --metric play_regret` judges closed-loop-like
 
 
+_PRED_CACHE: dict[tuple[str, str], dict[str, float]] = {}
+
+
+def _key(e: dict) -> str:
+    import hashlib
+
+    return e["id"] + ":" + hashlib.sha1((e["state_json"] + json.dumps(e["options"])).encode()).hexdigest()[:12]
+
+
 def _val_scores(model_dir: Path, val: list[dict]) -> tuple[list[float], dict]:
+    """Per-example ``METRIC`` and aggregate metrics of a saved model on ``val``. Predictions are cached per
+    (model, example text): the incumbent is re-scored on every move, but only new val examples cost a pass."""
     from rh17m import bekko_mlx as B
 
-    model = B.load(str(model_dir), revision=None)
-    t = json.loads((model_dir / "rh17m.json").read_text())["temperature"]
-    probs = predict(model, val, t)
+    todo = [e for e in val if (str(model_dir), _key(e)) not in _PRED_CACHE]
+    if todo:
+        model = B.load(str(model_dir), revision=None)
+        t = json.loads((model_dir / "rh17m.json").read_text())["temperature"]
+        for e, p in zip(todo, predict(model, todo, t), strict=True):
+            _PRED_CACHE[(str(model_dir), _key(e))] = p
+    probs = [_PRED_CACHE[(str(model_dir), _key(e))] for e in val]
     return per_example(val, probs, METRIC), metrics(val, probs)
 
 
