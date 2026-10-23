@@ -39,6 +39,8 @@ def coarse_moves() -> list[dict]:
         {"shuffle_options": False}, {"layouts": ["instruction_state"]},
         {"weight_decay": 0.0}, {"weight_decay": 0.1},
         {"train_splits": ["train", "ood"]},
+        {"data": {"scale": 1_000_000.0}}, {"data": {"scale": 20_000.0}},
+        {"data": {"min_spread": 0.05}}, {"data": {"min_spread": 0.1}},
     ]
 
 
