@@ -130,8 +130,19 @@ def climb(base: TrainConfig, labels_dir: Path, noise_seeds: int = 3, max_runs: i
         with ledger.open("a") as f:
             f.write(json.dumps(row) + "\n")
 
+    try:
+        from decision_mlx.tracking import Tracker, system_metrics  # noqa: F401 - PRs #7-#10
+        if not hasattr(Tracker, "log_table"):
+            raise ImportError
+    except ImportError:  # the local decision-mlx checkout predates those PRs
+        from rh17m._tracking import Tracker
+    tracker = Tracker("railhead-17m-climb", name=f"climb-{stamp}", config={"base": asdict(base),
+                      "noise_seeds": noise_seeds, "max_runs": max_runs})
+    moves_rows: list[list] = []
+
     def train(cfg: TrainConfig) -> Path:
         cfg.group = f"climb-{stamp}"
+        cfg.artifact = False  # only kept models become artifacts (below)
         out = ROOT / "runs" / "train" / cfg.name
         run(cfg, labels_dir, out)
         return out / "model"
@@ -150,6 +161,9 @@ def climb(base: TrainConfig, labels_dir: Path, noise_seeds: int = 3, max_runs: i
             inc_cfg, inc_dir = cfg, d
     noise = max(seeds_val) - min(seeds_val)
     log({"kind": "noise_floor", "exp_regret_by_seed": seeds_val, "noise": noise})
+    tracker.log({"climb/noise_floor": noise, "climb/base_exp_regret": min(seeds_val)}, step=0)
+    tracker.alert(f"climb-{stamp}: noise floor {noise:.4f}",
+                  f"val exp_regret by seed {[round(v, 4) for v in seeds_val]}", level="info")
     save_incumbent(inc_cfg, inc_dir, {"exp_regret": min(seeds_val)})
     runs = noise_seeds
     for phase, moves in (("coarse", coarse_moves()), ("fine", None)):
@@ -176,9 +190,17 @@ def climb(base: TrainConfig, labels_dir: Path, noise_seeds: int = 3, max_runs: i
             keep = diff < -noise and hi < 0
             log({"run": cfg.name, "kind": phase, "move": move, "val": ma, "incumbent_val": mb,
                  "diff_exp_regret": diff, "ci": [lo, hi], "noise": noise, "kept": keep, "n_val": len(val)})
+            tracker.log({"climb/candidate_exp_regret": ma["exp_regret"], "climb/incumbent_exp_regret": mb["exp_regret"],
+                         "climb/diff": diff, "climb/ci_low": lo, "climb/ci_high": hi, "climb/kept": float(keep),
+                         "climb/candidate_regret": ma["regret"], "climb/n_val": len(val)}, step=runs)
+            moves_rows.append([cfg.name, phase, json.dumps(move), round(ma["exp_regret"], 4), round(mb["exp_regret"], 4),
+                               round(diff, 4), round(lo, 4), round(hi, 4), keep, len(val)])
             if keep:
                 inc_cfg, inc_dir = cfg, cand_dir
                 save_incumbent(inc_cfg, inc_dir, ma)
+                tracker.alert(f"kept {json.dumps(move)}", f"val exp_regret {ma['exp_regret']:.4f}, diff {diff:+.4f} "
+                              f"[{lo:+.4f}, {hi:+.4f}] beyond noise {noise:.4f}", level="info")
+                tracker.log_artifact(cand_dir, name="railhead-17m", type="model", aliases=["incumbent", cfg.name])
                 if on_keep:
                     on_keep(cfg, cand_dir, ma)
                 if push:
@@ -186,6 +208,26 @@ def climb(base: TrainConfig, labels_dir: Path, noise_seeds: int = 3, max_runs: i
                               f"diff {diff:+.4f} [{lo:+.4f}, {hi:+.4f}])",
                               [ledger, INCUMBENT, ROOT / "runs" / "train" / cfg.name / "results.json",
                                ROOT / "runs" / "train" / cfg.name / "config.json"])
+    _climb_report(tracker, stamp, moves_rows, inc_cfg, noise, runs)
+    tracker.save_files(str(ledger), str(INCUMBENT))
+    tracker.finish()
     if push:
         _git_push("Climb: ledger after a full pass", [ledger, INCUMBENT])
     return inc_cfg
+
+
+MOVE_COLUMNS = ["run", "phase", "move", "candidate", "incumbent", "diff", "ci_low", "ci_high", "kept", "n_val"]
+
+
+def _climb_report(tracker, stamp: str, rows: list[list], inc_cfg: TrainConfig, noise: float, runs: int) -> None:
+    tracker.log_table("climb/moves", MOVE_COLUMNS, rows, step=runs)
+    kept = [r for r in rows if r[8]]
+    intro = (f"{len(rows)} moves tried, {len(kept)} kept; noise floor {noise:.4f} (val expected regret across "
+             "seeds). A move is kept when it beats the incumbent by more than the noise floor and its paired "
+             "bootstrap interval is entirely below zero.")
+    lines = [f"# Climb {stamp}", "", intro, "",
+             "| move | candidate | incumbent | diff | 95% CI | kept |", "|---|---|---|---|---|---|"]
+    lines += [f"| `{r[2]}` | {r[3]:.4f} | {r[4]:.4f} | {r[5]:+.4f} | [{r[6]:+.4f}, {r[7]:+.4f}] | "
+              f"{'**yes**' if r[8] else 'no'} |" for r in rows]
+    lines += ["", f"Incumbent: `{inc_cfg.name}`", "", "```json", json.dumps(asdict(inc_cfg), indent=1), "```"]
+    tracker.log_report("climb/report", "\n".join(lines), step=runs)

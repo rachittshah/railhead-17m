@@ -21,7 +21,7 @@ import numpy as np
 
 from rh17m import bekko_mlx as B
 from rh17m.dataset import DatasetConfig, load_examples
-from rh17m.evaluate import BASELINES, metrics
+from rh17m.evaluate import BASELINES, metrics, per_example
 
 LAYOUTS = ("instruction_state", "state_instruction")
 
@@ -44,6 +44,8 @@ class TrainConfig:
     compile: bool = True  # traced train step (shapes bucketed by pad_multiple)
     bf16: bool = True  # bf16 compute with fp32 master weights while training; evaluation runs in fp32
     track: bool = True  # stream metrics to Trackio (project "railhead-17m"; `trackio show` for the dashboard)
+    artifact: bool = True  # log the model export as a Trackio artifact (the climb logs only kept models)
+    n_traces: int = 20  # val decisions logged as traces
     group: str = ""  # Trackio run group (the climb sets one per climb)
     log_every: int = 5  # steps between train metric logs
     train_splits: tuple[str, ...] = ("train",)
@@ -105,13 +107,12 @@ TRACK_PROJECT = "railhead-17m"
 
 
 def _tracker(cfg: TrainConfig, extra: dict):
-    """The MLX infra's Trackio tracker (decision_mlx.tracking, decision-mlx PR #7)."""
+    """The MLX infra's Trackio tracker (decision_mlx.tracking, decision-mlx PRs #7-#10)."""
     try:
-        from decision_mlx.tracking import (
-            Tracker,
-            system_metrics,  # noqa: F401 - PR #8, the system sampler
-        )
-    except ImportError:  # the local decision-mlx checkout predates PRs #7/#8
+        from decision_mlx.tracking import Tracker
+        if not hasattr(Tracker, "log_table"):  # PRs #7-#10
+            raise ImportError
+    except ImportError:  # the local decision-mlx checkout predates them
         from rh17m._tracking import Tracker
     return Tracker(TRACK_PROJECT, name=cfg.name, group=cfg.group or None, config={**asdict(cfg), **extra},
                    enabled=cfg.track, system_interval=2.0)
@@ -192,7 +193,9 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
         model.set_compute_dtype(mx.float32)
         row = {"epoch": epoch, "loss": float(np.mean(losses)), "elapsed_s": round(time.perf_counter() - t0, 1)}
         if val:
-            m = metrics(val, predict(model, val))
+            vp = predict(model, val)
+            m = metrics(val, vp)
+            tracker.log_histogram("val/regret_hist", per_example(val, vp, "regret"), step=gstep)
             row.update({f"val_{k}": round(v, 5) for k, v in m.items()})
             if m["exp_regret"] < best["exp_regret"]:
                 best = {"epoch": epoch, "exp_regret": m["exp_regret"]}
@@ -209,10 +212,11 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
                "distilled": n_distill,
                "best_epoch": best["epoch"], "temperature": temperature,
                "train_s": round(time.perf_counter() - t0, 1)}
+    final_probs: dict[str, list[dict[str, float]]] = {}
     for s in ("val", "test", "ood"):
         part = splits[s]
         if part:
-            probs = predict(model, part, temperature)
+            probs = final_probs[s] = predict(model, part, temperature)
             results[s] = {k: round(v, 5) for k, v in metrics(part, probs).items()}
             results[f"{s}_raw"] = {k: round(v, 5) for k, v in metrics(part, predict(model, part)).items()}
             results[f"{s}_baselines"] = {n: {k: round(v, 5) for k, v in metrics(part, [f(e) for e in part]).items()}
@@ -231,5 +235,34 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
                 if v is not None:
                     final[f"final/{s}_baseline_{name}_{k}"] = v
     tracker.log(final, gstep + 1)
+    _log_rich(tracker, cfg, model, splits, final_probs, results, out_dir, temperature, gstep + 1)
     tracker.finish()
     return results
+
+
+def _log_rich(tracker, cfg: TrainConfig, model, splits: dict, final_probs: dict, results: dict, out_dir: Path,
+              temperature: float, step: int) -> None:
+    """Every Trackio tab beyond the curves: decisions tables, regret histograms, decision traces, the report,
+    an alert when the model beats the strongest scripted policy on val, files and the model artifact."""
+    from rh17m.track_rich import DECISION_COLUMNS, decision_rows, decision_trace, report_markdown
+
+    for s, probs in final_probs.items():
+        tracker.log_table(f"{s}/decisions", DECISION_COLUMNS, decision_rows(splits[s], probs), step=step)
+        tracker.log_histogram(f"{s}/final_regret_hist", per_example(splits[s], probs, "regret"), step=step)
+    for e in splits["val"][: cfg.n_traces]:
+        t0 = time.perf_counter()
+        p = temper(B.choice_probs(model, None, e["state_json"], e["instructions"], e["options"]), temperature)
+        tracker.log_trace(f"val/{e['id']}", **decision_trace(e, p, cfg.init, (time.perf_counter() - t0) * 1e3),
+                          step=step)
+    tracker.log_report("report", report_markdown(results, asdict(cfg)), step=step)
+    val, base = results.get("val"), results.get("val_baselines", {}).get("longest")
+    if val and base:
+        if val["regret"] < base["regret"]:
+            tracker.alert(f"{cfg.name} beats always-longest on val",
+                          f"regret {val['regret']:.4f} vs {base['regret']:.4f} (n={int(val['n'])})", level="info")
+        else:
+            tracker.alert(f"{cfg.name} does not beat always-longest on val",
+                          f"regret {val['regret']:.4f} vs {base['regret']:.4f} (n={int(val['n'])})", level="warn")
+    tracker.save_files(*(str(out_dir / f) for f in ("config.json", "results.json", "history.jsonl")))
+    if cfg.artifact:
+        tracker.log_artifact(out_dir / "model", name="railhead-17m", type="model", aliases=[cfg.name])

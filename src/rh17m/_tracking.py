@@ -1,4 +1,4 @@
-"""Vendored copy of decision_mlx.tracking (decision-mlx PRs #7, #8, #9); used only while the local decision-mlx
+"""Vendored copy of decision_mlx.tracking (decision-mlx PRs #7-#10); used only while the local decision-mlx
 checkout predates them. Optional experiment tracking with Trackio (local-first, wandb-compatible API).
 
     with Tracker("decision-mlx", name="kev-eval", config={"model": model}) as tracker:
@@ -174,6 +174,54 @@ class Tracker:
 
     def log_summary(self, result: Mapping[str, Any], prefix: str = "summary", step: int | None = None) -> None:
         self.log({prefix: result} if prefix else result, step=step)
+
+    # ------------------------------------------------------------------ rich data (tabs beyond Metrics)
+    def _log_object(self, key: str, make, step: int | None) -> None:
+        if self.active:
+            self._guard(lambda: self._trackio.log({key: make(self._trackio)}, step=step))
+
+    def log_table(self, key: str, columns: list[str], rows: list[list[Any]], step: int | None = None) -> None:
+        """A table in the Media & Tables tab."""
+        self._log_object(key, lambda t: t.Table(columns=list(columns), data=[list(r) for r in rows]), step)
+
+    def log_histogram(self, key: str, values, step: int | None = None, num_bins: int = 64) -> None:
+        """A histogram in the Media & Tables tab (one per step, so it can be compared over training)."""
+        self._log_object(key, lambda t: t.Histogram(list(values), num_bins=num_bins), step)
+
+    def log_image(self, key: str, image, caption: str | None = None, step: int | None = None) -> None:
+        """An image (path, numpy array or PIL image) in the Media & Tables tab."""
+        self._log_object(key, lambda t: t.Image(image, caption=caption), step)
+
+    def log_report(self, key: str, markdown: str, step: int | None = None) -> None:
+        """A Markdown report in the Reports tab."""
+        self._log_object(key, lambda t: t.Markdown(markdown), step)
+
+    def log_trace(self, key: str, messages: list[dict], metadata: Mapping[str, Any] | None = None,
+                  spans: list[dict] | None = None, step: int | None = None) -> None:
+        """A request/response trace (OpenAI-style messages, metadata, spans) in the Traces tab."""
+        self._log_object(key, lambda t: t.Trace(messages, metadata=dict(metadata or {}), spans=spans), step)
+
+    def alert(self, title: str, text: str | None = None, level: str = "warn") -> None:
+        """An alert (info, warn or error) in the Reports tab, and a webhook if one is configured."""
+        if self.active:
+            def call():
+                levels = getattr(self._trackio, "AlertLevel", None)
+                lvl = getattr(levels, level.upper(), level) if levels is not None else level
+                self._trackio.alert(title, text, level=lvl)
+
+            self._guard(call)
+
+    def save_files(self, *globs: str) -> None:
+        """Copy files (glob patterns) into the project's Files tab."""
+        if self.active:
+            for pattern in globs:
+                self._guard(lambda pattern=pattern: self._trackio.save(pattern))
+
+    def log_artifact(self, path, name: str | None = None, type: str | None = None,
+                     aliases: list[str] | None = None) -> None:
+        """A versioned artifact (a file or a directory such as a model export) in the Artifacts tab."""
+        if self.active:
+            self._guard(lambda: self._trackio.log_artifact(path, name=name, type=type, aliases=aliases))
 
     def finish(self) -> None:
         self._stop.set()

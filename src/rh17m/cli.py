@@ -142,13 +142,13 @@ def _publish(a: argparse.Namespace) -> int:
 def _watch(a: argparse.Namespace) -> int:
     """Log data-pipeline growth to Trackio (project railhead-17m-data) every ``interval`` seconds."""
     import time
+    from collections import Counter
 
     try:
-        from decision_mlx.tracking import (
-            Tracker,
-            system_metrics,  # noqa: F401 - PR #8, the system sampler
-        )
-    except ImportError:  # the local decision-mlx checkout predates PRs #7/#8
+        from decision_mlx.tracking import Tracker
+        if not hasattr(Tracker, "log_table"):  # PRs #7-#10
+            raise ImportError
+    except ImportError:  # the local decision-mlx checkout predates them
         from rh17m._tracking import Tracker
 
     from rh17m.dataset import DatasetConfig, load_examples
@@ -156,6 +156,7 @@ def _watch(a: argparse.Namespace) -> int:
     tracker = Tracker("railhead-17m-data", name=time.strftime("pipeline-%m%d-%H%M"), system_interval=10.0)
     labels, states = Path(a.labels), Path(a.states)
     step, prev, t_prev = 0, None, time.time()
+    errs_seen = 0
     while True:
         recs = [p for p in labels.glob("*.json") if not p.name.endswith(".error.json") and not p.name.startswith("_")]
         exs = load_examples(labels, DatasetConfig())
@@ -167,6 +168,15 @@ def _watch(a: argparse.Namespace) -> int:
         for split in ("train", "val", "test", "ood"):
             m[f"data/examples_{split}"] = sum(e["split"] == split for e in exs)
         tracker.log(m, step=step)
+        if step % 5 == 0:  # the composition table every ~10 minutes
+            by = Counter((e["split"], e["source"].split(":")[0]) for e in exs)
+            tracker.log_table("data/examples_by_split_source", ["split", "source", "examples"],
+                              [[sp, so, n] for (sp, so), n in sorted(by.items())], step=step)
+        errors = sorted(labels.glob("*.error.json"))
+        if errors and len(errors) > errs_seen:
+            tracker.alert(f"{len(errors) - errs_seen} new label error(s)", ", ".join(p.stem for p in errors[errs_seen:][:5]),
+                          level="error")
+            errs_seen = len(errors)
         step, prev, t_prev = step + 1, len(recs), now
         time.sleep(a.interval)
 
@@ -190,6 +200,10 @@ def _play_report(a: argparse.Namespace) -> int:
     out = report(Path(a.root))
     print(json.dumps(out, indent=1))
     Path(a.root, "summary.json").write_text(json.dumps(out, indent=1))
+    if a.track:
+        from rh17m.play import track_report
+
+        track_report(Path(a.root), out)
     return 0
 
 
@@ -279,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
 
     pr = sub.add_parser("play-report", help="paired closed-loop summary of every policy under runs/play")
     pr.add_argument("--root", default=str(Path(__file__).resolve().parents[2] / "runs" / "play"))
+    pr.add_argument("--track", action="store_true", help="also log tables, curve images and a report to Trackio")
     pr.set_defaults(fn=_play_report)
 
     b = sub.add_parser("bench", help="simulator throughput")

@@ -155,3 +155,92 @@ def report(play_root: Path) -> dict:
                                   "median_nw": round(statistics.median(nws)) if nws else None,
                                   "games": sum(len(by_task[t]) for t in shared)}
     return out
+
+
+PALETTE = [(47, 107, 79), (201, 130, 27), (58, 100, 168), (196, 90, 44), (122, 82, 160), (90, 90, 90)]
+
+
+def curves_image(play_root: Path, task: str, path: Path, width: int = 900, height: int = 420) -> Path | None:
+    """PNG of net worth over the game for every policy that played ``task`` (asinh scale, so £-50k and £50M
+    share an axis). Drawn with PIL, which Trackio already requires."""
+    import math
+
+    from PIL import Image, ImageDraw
+
+    series = {}
+    for f in sorted(Path(play_root).glob(f"*/*.{task}.s*.json")):
+        r = json.loads(f.read_text())
+        label = r["policy"] if r["policy"] != "model" else f"model:{f.parent.name}"
+        if r.get("curve"):
+            series[label] = [math.asinh(v / 1e5) for v in r["curve"]]
+    if not series:
+        return None
+    img = Image.new("RGB", (width, height), (255, 255, 255))
+    d = ImageDraw.Draw(img)
+    pad_l, pad_r, pad_t, pad_b = 60, 180, 30, 40
+    lo = min(min(v) for v in series.values())
+    hi = max(max(v) for v in series.values())
+    hi = hi if hi > lo else lo + 1
+    n = max(len(v) for v in series.values())
+    d.rectangle([pad_l, pad_t, width - pad_r, height - pad_b], outline=(200, 205, 200))
+    for tick in range(math.floor(lo), math.ceil(hi) + 1):
+        y = height - pad_b - (tick - lo) / (hi - lo) * (height - pad_t - pad_b)
+        if pad_t <= y <= height - pad_b:
+            d.line([pad_l, y, width - pad_r, y], fill=(235, 238, 235))
+            d.text((6, y - 6), f"{math.sinh(tick) * 1e5 / 1e6:,.2f}M", fill=(90, 100, 95))
+    for i, (label, vals) in enumerate(sorted(series.items())):
+        color = PALETTE[i % len(PALETTE)]
+        pts = [(pad_l + j / max(1, n - 1) * (width - pad_l - pad_r),
+                height - pad_b - (v - lo) / (hi - lo) * (height - pad_t - pad_b)) for j, v in enumerate(vals)]
+        if len(pts) > 1:
+            d.line(pts, fill=color, width=3)
+        d.text((width - pad_r + 12, pad_t + 18 * i), label, fill=color)
+    d.text((pad_l, 8), f"{task}: net worth (GBP) at each wake-up, asinh scale", fill=(24, 35, 28))
+    img.save(path)
+    return Path(path)
+
+
+def track_report(play_root: Path, summary: dict) -> None:
+    """Closed-loop results into Trackio project railhead-17m-play: per-policy and per-task tables, net-worth
+    curve images per task, and a Markdown report."""
+    import tempfile
+    import time
+
+    try:
+        from decision_mlx.tracking import Tracker
+        if not hasattr(Tracker, "log_table"):
+            raise ImportError
+    except ImportError:
+        from rh17m._tracking import Tracker
+
+    t = Tracker("railhead-17m-play", name=time.strftime("closed-loop-%m%d-%H%M"))
+    pol = summary.get("policies", {})
+    t.log_table("closed_loop/policies", ["policy", "mean_score", "median_net_worth", "games"],
+                [[k, v["mean_score"], v["median_nw"], v["games"]] for k, v in sorted(pol.items(), key=lambda kv: -kv[1]["mean_score"])],
+                step=0)
+    rows = []
+    for f in sorted(Path(play_root).glob("*/*.json")):
+        if f.name == "summary.json":
+            continue
+        r = json.loads(f.read_text())
+        rows.append([r["policy"] if r["policy"] != "model" else f"model:{f.parent.name}", r["task"], r["seed"],
+                     round(r["score"], 4), r["final_nw"], r["builds"], r["built_ok"]])
+    t.log_table("closed_loop/games", ["policy", "task", "seed", "score", "final_net_worth", "builds", "built_ok"],
+                rows, step=0)
+    with tempfile.TemporaryDirectory(prefix="rh17m-curves-") as tmp:
+        for task in summary.get("tasks", []):
+            png = curves_image(play_root, task, Path(tmp) / f"{task}.png")
+            if png is not None:
+                t.log_image(f"curves/{task}", str(png), caption=f"net worth by policy on {task}", step=0)
+    lines = ["# Closed loop on held-out maps", "", f"Tasks: {', '.join(summary.get('tasks', []))}", "",
+             "| policy | mean arena score | median final net worth | games |", "|---|---|---|---|"]
+    lines += [f"| {k} | {v['mean_score']:.4f} | £{v['median_nw']:,} | {v['games']} |"
+              for k, v in sorted(pol.items(), key=lambda kv: -kv[1]["mean_score"])]
+    t.log_report("closed_loop/report", "\n".join(lines), step=0)
+    best = max(pol.items(), key=lambda kv: kv[1]["mean_score"])[0] if pol else None
+    models = {k: v for k, v in pol.items() if k.startswith("model:")}
+    if models and best:
+        level = "info" if best.startswith("model:") else "warn"
+        t.alert(f"closed loop: best policy is {best}", f"mean scores {json.dumps({k: v['mean_score'] for k, v in pol.items()})}",
+                level=level)
+    t.finish()
