@@ -60,7 +60,13 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   - [x] MLX cache capped at 2 GB + cleared per run: climb had 21.6 GB cached (31.8 GB GPU alloc) -> swap,
         load 200, labels 360-460 s/state; after fix labels recovered (~60/h -> ~157/h and rising)
   - Climb predictions cached per (model, example text)
-- Now: [→] climb pass 3 (play_regret, 2 seeds, ~435 ex); play-v2 window: baselines + incumbent, 11 dev maps
+  - [x] Pass 3 (play_regret, 2 seeds): all moves 'lost' by ~0.04 -> A/A control showed it is noise:
+        base seeds differ by 0.041, same config/seeds retrained moved +0.027 [-0.005,+0.063] (training is not
+        bit-deterministic run to run). Climb now: 3 seeds, exp_regret keep metric, A/A control each pass
+  - [→] Expansion options (lbl-v3, src/rh17m/expand.py): add 2 (or 1) planes to the 3 most profitable air
+        routes; labels/play/self-play/observe all execute options via expand.apply_option (player play-v3).
+        NOT yet verified end to end; label test running (b794wy2pt); labellers still on code loaded before v3
+- Now: [→] climb pass 4 (15:40, 627 ex, 113 val, 3 seeds, exp_regret); labellers train x11, val x8, test x3
 - Open: UNCONFIRMED flaky unit test (1 failure once under heavy load, not reproduced in 4 runs)
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
 - Remaining:
