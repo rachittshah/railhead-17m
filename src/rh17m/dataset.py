@@ -71,10 +71,31 @@ def describe(c: dict, money0: int, features: bool) -> str:
     text = (f"air route {a.get('name')} ({a.get('population')} people) to {b.get('name')} "
             f"({b.get('population')} people), {c['length_tiles']} tiles, estimated cost £{_k(c['estimated_cost'])}k")
     if features:
+        # The estimate is two large airports and two fast planes; a poorer company builds it smaller (the build
+        # ladder), so this is a scale hint, not a yes/no on whether it can be built.
         left = int(money0) - int(c["estimated_cost"])
-        text += (f"; affordable, £{_k(left)}k cash left after building" if left >= 0
-                 else f"; not affordable, short by £{_k(-left)}k")
+        text += (f"; £{_k(left)}k cash would remain after that cost" if left >= 0
+                 else f"; that cost exceeds the cash by £{_k(-left)}k")
     return text
+
+
+def observation(rendered_state: dict, candidates: list[dict], money0: int, cfg: DatasetConfig) -> dict:
+    """What a policy sees at a wake-up: the state text, the question and the options, plus the scripted
+    baselines' features. The training examples and the online player both build it here, so the model reads
+    the same text offline and in play."""
+    options = [(c["candidate_id"], describe(c, money0, cfg.features)) for c in candidates]
+    options.append((HOLD, "build nothing now and keep the cash"))
+    state = dict(rendered_state)
+    if cfg.drop_candidate_table:
+        state.pop("candidates", None)
+    return {
+        "state_json": json.dumps(state, separators=(",", ":")), "instructions": INSTRUCTIONS,
+        "options": options, "money0": money0,
+        "features": {c["candidate_id"]: {"length": c["length_tiles"], "cost": c["estimated_cost"],
+                                         "pop_min": min(int(c["a"].get("population") or 0),
+                                                        int(c["b"].get("population") or 0))}
+                     for c in candidates},
+    }
 
 
 def build_example(rec: dict, cfg: DatasetConfig) -> dict | None:
@@ -82,22 +103,12 @@ def build_example(rec: dict, cfg: DatasetConfig) -> dict | None:
     if max(q.values()) - min(q.values()) < cfg.min_spread:
         return None
     by_id = {c["candidate_id"]: c for c in rec["candidates"]}
-    options = [(k, describe(by_id[k], rec["money0"], cfg.features)) for k in rec["options"] if k != HOLD]
-    options.append((HOLD, "build nothing now and keep the cash"))
-    state = dict(rec["rendered_state"])
-    if cfg.drop_candidate_table:
-        state.pop("candidates", None)
+    cands = [by_id[k] for k in rec["options"] if k != HOLD]
     meta = rec["state"]
     return {
         "id": meta["state_id"], "task_id": meta["task_id"], "split": map_split(meta["task_id"]),
-        "source": meta["source"], "state_json": json.dumps(state, separators=(",", ":")),
-        "instructions": INSTRUCTIONS, "options": options, "q": q, "se": se,
-        "target": soft_target(q, cfg.tau), "best": max(q, key=q.get),
-        "features": {k: {"length": by_id[k]["length_tiles"], "cost": by_id[k]["estimated_cost"],
-                         "pop_min": min(int(by_id[k]["a"].get("population") or 0),
-                                        int(by_id[k]["b"].get("population") or 0))}
-                     for k in rec["options"] if k != HOLD},
-        "money0": rec["money0"],
+        "source": meta["source"], **observation(rec["rendered_state"], cands, rec["money0"], cfg),
+        "q": q, "se": se, "target": soft_target(q, cfg.tau), "best": max(q, key=q.get),
     }
 
 

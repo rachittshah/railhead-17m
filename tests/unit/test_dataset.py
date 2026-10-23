@@ -47,7 +47,7 @@ def test_example_options_describe_affordability_and_hold():
     keys = [k for k, _ in ex["options"]]
     assert keys == ["a", "b", "hold"]
     text = dict(ex["options"])
-    assert "affordable" in text["a"] and "not affordable" in text["b"]
+    assert "cash would remain" in text["a"] and "exceeds the cash" in text["b"]
     assert "build nothing" in text["hold"]
     assert ex["best"] == "a"
     assert ex["split"] == "train"
