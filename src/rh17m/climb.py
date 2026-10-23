@@ -115,6 +115,7 @@ def _run_retrying(cfg: TrainConfig, labels_dir: Path, out: Path, attempts: int =
     raise RuntimeError("unreachable")
 
 
+TEXT_KEYS = frozenset({"features", "drop_candidate_table", "ranks", "plane"})  # rendering only
 METRIC = "exp_regret"  # the climb's keep metric; `rh17m climb --metric play_regret` judges closed-loop-like
 # Judge on val decisions labelled under this rollout continuation only ("any": all). Hold-continuation labels
 # over-reward expansions; models that fit them better played worse (see runs/climb/gates.jsonl).
@@ -220,8 +221,16 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
             dirs.append(ROOT / "runs" / "train" / c.name / "model")
         return dirs
 
+    # Every config is judged on the same decisions: options, values and targets come from the base config's
+    # data settings; only the settings that change what the model reads (TEXT_KEYS) are the model's own.
+    # (A route-only or rescaled val would have fewer options or another value scale: lower regret by
+    # construction, not a better model.)
+    judge_data = {k: v for k, v in base.data.items() if k not in TEXT_KEYS}
+
     def val_for(cfg: TrainConfig) -> list[dict]:
-        data = {**cfg.data, "continuation": VAL_CONTINUATION} if VAL_CONTINUATION != "any" else cfg.data
+        data = {**judge_data, **{k: v for k, v in cfg.data.items() if k in TEXT_KEYS}}
+        if VAL_CONTINUATION != "any":
+            data["continuation"] = VAL_CONTINUATION
         return sorted((e for e in load_examples(labels_dir, DatasetConfig(**data)) if e["split"] == "val"),
                       key=lambda e: e["id"])
 

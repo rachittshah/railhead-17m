@@ -1,9 +1,7 @@
 {
  "config": {
-  "name": "1023-2119-coarse04",
-  "data": {
-   "expansions": false
-  },
+  "name": "base",
+  "data": {},
   "init": "bekko",
   "epochs": 8,
   "batch_size": 16,
@@ -33,29 +31,29 @@
   "distill_max": 0,
   "distill_temperature": 1.0,
   "obs_dir": "obs-v3",
-  "distill_ref": "",
-  "freeze_embeddings": true,
+  "freeze_embeddings": false,
   "freeze_layers": 0,
   "select_metric": "exp_regret",
   "patience": 3
  },
- "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-2119-coarse04-s0/model",
+ "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s1/model",
  "val": {
-  "regret": 0.30738432250955183,
-  "exp_regret": 0.35281875883093744,
-  "capture": 0.10896797333473297,
-  "hit": 0.32950191570881227,
-  "nll": 2.162518913956782,
-  "conf": 0.17977069304560503,
-  "pick_hold": 0.022988505747126436,
-  "play_regret": 0.27265685452624666,
-  "ece": 0.14973122266320724,
-  "n": 87.0
+  "regret": 0.20976,
+  "exp_regret": 0.28258,
+  "capture": 0.18087,
+  "hit": 0.28125,
+  "nll": 2.15613,
+  "conf": 0.17091,
+  "pick_hold": 0.0625,
+  "play_regret": 0.19024,
+  "ece": 0.11034,
+  "n": 128
  },
  "seed_dirs": [
-  "/Users/rachitt/railhead-17m/runs/train/1023-2119-coarse04-s0/model",
-  "/Users/rachitt/railhead-17m/runs/train/1023-2119-coarse04-s1/model",
-  "/Users/rachitt/railhead-17m/runs/train/1023-2119-coarse04-s2/model"
+  "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s0/model",
+  "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s1/model",
+  "/Users/rachitt/railhead-17m/runs/train/1023-1627-base-s2/model"
  ],
- "saved": "2026-10-23 22:33:19"
+ "saved": "2026-10-23 22:40:00",
+ "note": "restored: pass-8 keeps (expansions=false, then freeze_embeddings) were scored on a different val definition"
 }
