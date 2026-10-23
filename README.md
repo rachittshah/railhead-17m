@@ -50,7 +50,8 @@ Closed loop: full games on held-out maps, Railhead's arena score (`tycoon_log`).
 ```bash
 uv venv --python 3.12 .venv && uv pip install -e '.[dev]'
 .venv/bin/rh17m tasks                      # Hub tasks -> data/tasks
-scripts/data_pipeline.sh                   # harvest states + label (resumable; tmux recommended)
+scripts/launch.sh                          # tmux session rh17m: harvest, label (train/val/test), observe, play, watch, dashboard
+scripts/stop.sh                            # stop every stage cleanly (all stages resume on relaunch)
 .venv/bin/rh17m baselines                  # scripted policies on the labelled decisions
 .venv/bin/rh17m train --name v1            # one training run -> runs/train/v1
 .venv/bin/rh17m climb                      # hillclimb with a noise floor -> runs/climb/ledger.jsonl

@@ -52,5 +52,5 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
 
 ## Working set
 - Repo: ~/railhead-17m (branch main). Data: data/{states,labels,tasks,logs} (git-ignored).
-- Pipeline: `scripts/data_pipeline.sh` (tmux rh17m-data). Progress: data/labels/_progress.log.
+- Pipeline: `scripts/launch.sh` (tmux session rh17m, one window per stage); `scripts/stop.sh`. Logs: data/logs/.
 - Tests: `.venv/bin/python -m pytest -q tests/unit`.
