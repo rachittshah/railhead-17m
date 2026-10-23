@@ -90,35 +90,14 @@ def _load(init: str):
 TRACK_PROJECT = "railhead-17m"
 
 
-class _Tracker:
-    """Trackio when enabled and importable; otherwise a no-op. Tracking never stops a training run."""
-
-    def __init__(self, cfg: TrainConfig, extra: dict):
-        self.run = None
-        if not cfg.track:
-            return
-        try:
-            import trackio
-
-            self.trackio = trackio
-            self.run = trackio.init(project=TRACK_PROJECT, name=cfg.name, group=cfg.group or None,
-                                    config={**asdict(cfg), **extra}, embed=False, auto_log_gpu=True)
-        except Exception as e:  # noqa: BLE001 - the dashboard is optional
-            print(f"trackio disabled: {e!r}")
-
-    def log(self, metrics: dict, step: int) -> None:
-        if self.run is not None:
-            try:
-                self.trackio.log({k: v for k, v in metrics.items() if isinstance(v, (int, float))}, step=step)
-            except Exception as e:  # noqa: BLE001
-                print(f"trackio log failed: {e!r}")
-
-    def finish(self) -> None:
-        if self.run is not None:
-            try:
-                self.trackio.finish()
-            except Exception as e:  # noqa: BLE001
-                print(f"trackio finish failed: {e!r}")
+def _tracker(cfg: TrainConfig, extra: dict):
+    """The MLX infra's Trackio tracker (decision_mlx.tracking, decision-mlx PR #7)."""
+    try:
+        from decision_mlx.tracking import Tracker
+    except ImportError:  # the local decision-mlx checkout predates PR #7
+        from rh17m._tracking import Tracker
+    return Tracker(TRACK_PROJECT, name=cfg.name, group=cfg.group or None, config={**asdict(cfg), **extra},
+                   enabled=cfg.track, auto_log_gpu=True)
 
 
 def _lr(opt, index: int) -> float:
@@ -153,7 +132,7 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
     best = {"epoch": -1, "exp_regret": float("inf")}
     best_params = None
     hist = (out_dir / "history.jsonl").open("w")
-    tracker = _Tracker(cfg, {"n_" + k: len(v) for k, v in splits.items()} | {"n_train_used": len(train)})
+    tracker = _tracker(cfg, {"n_" + k: len(v) for k, v in splits.items()} | {"n_train_used": len(train)})
     gstep = 0
     t0 = time.perf_counter()
     for epoch in range(cfg.epochs):

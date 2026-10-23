@@ -105,10 +105,8 @@ def _play(a: argparse.Namespace) -> int:
 
 
 def _climb(a: argparse.Namespace) -> int:
-    from rh17m.climb import climb
+    from rh17m.climb import climb, load_incumbent
     from rh17m.train import TrainConfig
-
-    from rh17m.climb import load_incumbent
 
     base = (load_incumbent() if a.from_incumbent else None) or TrainConfig(name="base")
     for kv in a.set:
@@ -139,12 +137,14 @@ def _watch(a: argparse.Namespace) -> int:
     """Log data-pipeline growth to Trackio (project railhead-17m-data) every ``interval`` seconds."""
     import time
 
-    import trackio
+    try:
+        from decision_mlx.tracking import Tracker
+    except ImportError:  # the local decision-mlx checkout predates PR #7
+        from rh17m._tracking import Tracker
 
     from rh17m.dataset import DatasetConfig, load_examples
 
-    trackio.init(project="railhead-17m-data", name=time.strftime("pipeline-%m%d-%H%M"), embed=False,
-                 auto_log_cpu=True)
+    tracker = Tracker("railhead-17m-data", name=time.strftime("pipeline-%m%d-%H%M"), auto_log_cpu=True)
     labels, states = Path(a.labels), Path(a.states)
     step, prev, t_prev = 0, None, time.time()
     while True:
@@ -157,7 +157,7 @@ def _watch(a: argparse.Namespace) -> int:
              "data/examples": len(exs)}
         for split in ("train", "val", "test", "ood"):
             m[f"data/examples_{split}"] = sum(e["split"] == split for e in exs)
-        trackio.log(m, step=step)
+        tracker.log(m, step=step)
         step, prev, t_prev = step + 1, len(recs), now
         time.sleep(a.interval)
 
