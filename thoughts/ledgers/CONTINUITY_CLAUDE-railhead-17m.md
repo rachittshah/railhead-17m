@@ -92,7 +92,11 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   - [x] Pass 8 artifact: 'expansions:false' kept because its val had fewer options (lower regret by
         construction). Fix: all configs judged on the same decisions (options/values/targets from the base
         config; only text keys follow the candidate). Incumbent restored again to 1023-1627-base-s1.
-- Now: [→] climb pass 9 (22:37, 1356 ex, 247 val; v4 val judging; same-decision judging; closed-loop gate)
+- PAUSED 2026-10-23 ~22:45 at the user's request (machine freed for gaming): every stage stopped with
+  scripts/stop.sh; data/labels/.stop set. Pass 9 was interrupted during its teacher retrain (nothing lost:
+  labels/states/obs on disk; incumbent = 1023-1627-base-s1).
+- Resume: rm data/labels/.stop; echo 0 > runs/climb/last_n; scripts/launch.sh (harvest step is a no-op,
+  labellers/climb/watch/dashboard restart; play/observe windows also relaunch, safe to kill if not wanted).
 - Next: if v4-only training wins offline AND in the gate, the label generation question is settled
 - Open: UNCONFIRMED flaky unit test (1 failure once under heavy load, not reproduced in 4 runs)
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
