@@ -41,12 +41,12 @@ HOLD = "hold"
 @dataclass(frozen=True)
 class LabelConfig:
     seeds: int = 3  # val/test/ood states: evaluation needs the tighter values
-    train_seeds: int = 2  # train states: a third fewer rollouts; common random numbers keep differences tight
+    train_seeds: int = 1  # train states: CRN keeps option differences tight; more states beat more seeds
     chunk_days: int = 91
     chunks: int = 8  # 728 days: about two years, long enough for an air route to pay back
     max_air: int = 8
     planes: int = 2
-    version: str = "lbl-v2.3"  # v2.1 plane per candidate; v2.2 NO_SITE ladder, no-build skip; v2.3 2 train seeds
+    version: str = "lbl-v2.4"  # v2.1 plane; v2.2 NO_SITE ladder, no-build skip; v2.3 2 train seeds; v2.4 1 train seed
 
 
 # How a chosen route is built: the first configuration the company can pay for. A large airport with two
