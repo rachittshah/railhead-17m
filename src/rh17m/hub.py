@@ -80,3 +80,54 @@ def harvest_hub_teachers(root: Path, repo: str = REPO) -> Iterator[dict]:
                 end_date = int(w.state()["date"]) + TaskSpec.load(task_dir).horizon_days
             got = harvest_teacher(task_id, policy, log_path, root, end_date=end_date)
         yield {"task": task_id, "model": policy, "states": len(got)}
+
+
+# ---------------------------------------------------------------------- publishing (private repos)
+MODEL_REPO = "rachittshah/railhead-17m"
+DATA_REPO = "rachittshah/railhead-17m-decisions"
+
+
+def _api():
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    api.whoami()  # raises without a token: publishing needs `hf auth login`
+    return api
+
+
+def publish_model(run_dir: Path, repo: str = MODEL_REPO, card: str | None = None) -> str:
+    """Upload ``run_dir/model`` (MLX-trained, published Bekko parameter names), ``results.json`` and a model
+    card to a private model repo, one commit per call."""
+    api = _api()
+    run_dir = Path(run_dir)
+    api.create_repo(repo, repo_type="model", private=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="rh17m-publish-") as tmp:
+        stage = Path(tmp)
+        import shutil
+
+        shutil.copytree(run_dir / "model", stage, dirs_exist_ok=True)
+        for name in ("results.json", "config.json", "history.jsonl"):
+            if (run_dir / name).exists():
+                shutil.copy(run_dir / name, stage / name)
+        if card is not None:
+            (stage / "README.md").write_text(card)
+        api.upload_folder(folder_path=str(stage), repo_id=repo, repo_type="model",
+                          commit_message=f"railhead-17m: {run_dir.name}")
+    return f"https://huggingface.co/{repo}"
+
+
+def publish_decisions(labels_dir: Path, repo: str = DATA_REPO) -> str:
+    """Upload the labelled decisions as JSONL per split (one record per state, simulator values included)."""
+    from rh17m.dataset import DatasetConfig, load_examples
+
+    api = _api()
+    api.create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
+    exs = load_examples(Path(labels_dir), DatasetConfig())
+    with tempfile.TemporaryDirectory(prefix="rh17m-decisions-") as tmp:
+        for split in sorted({e["split"] for e in exs}):
+            rows = [{k: e[k] for k in ("id", "task_id", "split", "source", "state_json", "instructions", "options",
+                                       "q", "se", "target", "best")} for e in exs if e["split"] == split]
+            (Path(tmp) / f"{split}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        api.upload_folder(folder_path=tmp, repo_id=repo, repo_type="dataset",
+                          commit_message=f"{len(exs)} labelled route decisions")
+    return f"https://huggingface.co/datasets/{repo}"

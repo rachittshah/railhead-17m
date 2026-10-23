@@ -119,6 +119,17 @@ def _climb(a: argparse.Namespace) -> int:
     return 0
 
 
+def _publish(a: argparse.Namespace) -> int:
+    from rh17m.hub import publish_decisions, publish_model
+
+    if a.what == "model":
+        card = Path(a.card).read_text() if a.card else None
+        print(publish_model(Path(a.run), card=card))
+    else:
+        print(publish_decisions(Path(a.labels)))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(prog="rh17m")
@@ -180,6 +191,13 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--workers", type=int, default=4)
     pl.add_argument("--out", default=str(Path(__file__).resolve().parents[2] / "runs" / "play"))
     pl.set_defaults(fn=_play)
+
+    pb = sub.add_parser("publish", help="upload a model run or the decisions to private Hub repos")
+    pb.add_argument("what", choices=["model", "decisions"])
+    pb.add_argument("--run", default="")
+    pb.add_argument("--card", default="")
+    pb.add_argument("--labels", default=str(DATA / "labels"))
+    pb.set_defaults(fn=_publish)
 
     b = sub.add_parser("bench", help="simulator throughput")
     b.add_argument("rest", nargs=argparse.REMAINDER)
