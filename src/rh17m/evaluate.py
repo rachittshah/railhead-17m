@@ -9,6 +9,8 @@ probabilities:
   pick that the policy's pick keeps (1 = oracle, 0 = random on average).
 - ``hit``: the pick is within ``2 * se`` of the best option (seed noise cannot separate them).
 - ``nll``: cross-entropy of the soft target under p. ``ece``: 10-bin calibration error of max p vs hit.
+- ``play_regret``: regret of the closed-loop player's outcome (``play_value``): it walks the options in the
+  policy's order and skips builds that failed without spending, as play-v2 does.
 """
 
 from __future__ import annotations
@@ -22,6 +24,18 @@ Policy = Callable[[dict], dict[str, float]]
 
 def _pick(p: dict[str, float]) -> str:
     return max(p, key=lambda k: (p[k], k == "hold"))
+
+
+def play_value(ex: dict, p: dict[str, float], max_tries: int = 3) -> float:
+    """The value the closed-loop player (play-v2) would get: options in the policy's order, a build that
+    failed without spending moves on to the next (up to ``max_tries``), ``hold`` stops the walk."""
+    built = ex.get("built") or {}
+    for i, k in enumerate(sorted(p, key=lambda k: (-p[k], k != "hold"))):
+        if k == "hold" or i >= max_tries:
+            return ex["q"]["hold"]
+        if built.get(k, True):
+            return ex["q"][k]
+    return ex["q"]["hold"]
 
 
 def decision_metrics(ex: dict, p: dict[str, float]) -> dict[str, float]:
@@ -39,6 +53,7 @@ def decision_metrics(ex: dict, p: dict[str, float]) -> dict[str, float]:
         "nll": -sum(t * math.log(max(p.get(k, 0.0) / z, 1e-12)) for k, t in ex["target"].items() if t > 0),
         "conf": max(p.values()) / z,
         "pick_hold": float(pick == "hold"),
+        "play_regret": best - play_value(ex, p),
     }
 
 

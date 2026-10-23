@@ -35,3 +35,15 @@ def test_longest_affordable_skips_unaffordable_routes():
 def test_bootstrap_diff_detects_a_consistent_gain():
     mean, lo, _ = bootstrap_diff([1.0] * 50, [0.0] * 50)
     assert mean == pytest.approx(1.0) and lo > 0.9
+
+
+def test_play_regret_skips_options_that_fail_to_build():
+    from rh17m.evaluate import decision_metrics
+
+    e = _ex({"a": 1.0, "b": 0.6, "hold": 0.0})
+    e["built"] = {"a": False, "b": True, "hold": True}
+    m = decision_metrics(e, {"a": 0.7, "b": 0.2, "hold": 0.1})
+    assert m["regret"] == pytest.approx(0.0)  # argmax is the best option on paper
+    assert m["play_regret"] == pytest.approx(0.4)  # but it cannot be built, so the player gets b
+    m = decision_metrics(e, {"a": 0.5, "hold": 0.4, "b": 0.1})
+    assert m["play_regret"] == pytest.approx(1.0)  # hold comes before b: the player stops there

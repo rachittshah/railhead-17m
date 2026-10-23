@@ -19,9 +19,9 @@ while [[ ! -f data/labels/.stop ]]; do
   if (( val >= MIN_VAL )) && (( n >= last * GROWTH )); then
     echo "$(date +%H:%M) climb pass on $n examples ($val val)" | tee -a data/logs/climb_loop.log
     if [[ -f runs/climb/incumbent.json ]]; then
-      $R climb --from-incumbent --seeds 2 --max-runs ${MAX_RUNS:-70} >> data/logs/climb.log 2>&1
+      $R climb --from-incumbent --seeds 2 --metric ${CLIMB_METRIC:-play_regret} --max-runs ${MAX_RUNS:-80} >> data/logs/climb.log 2>&1
     else
-      $R climb --seeds 2 --max-runs ${MAX_RUNS:-70} >> data/logs/climb.log 2>&1
+      $R climb --seeds 2 --metric ${CLIMB_METRIC:-play_regret} --max-runs ${MAX_RUNS:-80} >> data/logs/climb.log 2>&1
     fi
     inc=$(.venv/bin/python -I -c "import json; print(json.load(open('runs/climb/incumbent.json'))['model_dir'])" 2>/dev/null)
     if [[ -n "$inc" ]]; then

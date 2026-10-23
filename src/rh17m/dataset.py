@@ -154,10 +154,14 @@ def build_example(rec: dict, cfg: DatasetConfig) -> dict | None:
     by_id = {c["candidate_id"]: c for c in rec["candidates"]}
     cands = [by_id[k] for k in rec["options"] if k != HOLD]
     meta = rec["state"]
+    # Which options changed the world when built (a build that failed before spending is the hold world):
+    # the offline replay of the player's fallback rule needs it (evaluate.play_regret).
+    built = {k: (k == HOLD or bool(o.get("ok")) or bool(o.get("cost")) or "alias" not in o)
+             for k, o in rec["outcomes"].items()}
     return {
         "id": meta["state_id"], "task_id": meta["task_id"], "split": map_split(meta["task_id"]),
         "source": meta["source"], **observation(rec["rendered_state"], cands, rec["money0"], cfg),
-        "q": q, "se": se, "target": soft_target(q, cfg.tau), "best": max(q, key=q.get),
+        "q": q, "se": se, "target": soft_target(q, cfg.tau), "best": max(q, key=q.get), "built": built,
     }
 
 

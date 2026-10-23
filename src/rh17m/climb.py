@@ -44,6 +44,7 @@ def coarse_moves() -> list[dict]:
         {"data": {"min_spread": 0.05}}, {"data": {"min_spread": 0.1}},
         # Regularisation for small data: keep the lower encoder pretrained.
         {"freeze_embeddings": True}, {"freeze_embeddings": True, "freeze_layers": 3}, {"freeze_layers": -1},
+        {"select_metric": "play_regret"}, {"select_metric": "nll"},
         # Distillation over unlabelled train-map states: from the incumbent itself, and from the latest larger
         # teacher (runs/teachers/current, e.g. Bekko-68M trained on the same labels) when one exists.
         {"distill_from": "@incumbent", "distill_max": 1000},
@@ -101,13 +102,16 @@ def _run_retrying(cfg: TrainConfig, labels_dir: Path, out: Path, attempts: int =
     raise RuntimeError("unreachable")
 
 
+METRIC = "exp_regret"  # the climb's keep metric; `rh17m climb --metric play_regret` judges closed-loop-like
+
+
 def _val_scores(model_dir: Path, val: list[dict]) -> tuple[list[float], dict]:
     from rh17m import bekko_mlx as B
 
     model = B.load(str(model_dir), revision=None)
     t = json.loads((model_dir / "rh17m.json").read_text())["temperature"]
     probs = predict(model, val, t)
-    return per_example(val, probs, "exp_regret"), metrics(val, probs)
+    return per_example(val, probs, METRIC), metrics(val, probs)
 
 
 def _git_push(message: str, paths: list[Path]) -> None:
@@ -194,10 +198,10 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
             mets.append(m)
         mean = [sum(col) / len(col) for col in zip(*per_seed, strict=True)]
         avg = {k: sum(m[k] for m in mets) / len(mets) for k in mets[0]}
-        return mean, avg, [m["exp_regret"] for m in mets]
+        return mean, avg, [m[METRIC] for m in mets]
 
     def best_seed(dirs: list[Path], val: list[dict]) -> Path:
-        return min(dirs, key=lambda d: _val_scores(d, val)[1]["exp_regret"])
+        return min(dirs, key=lambda d: _val_scores(d, val)[1][METRIC])
 
     inc_cfg = copy.deepcopy(base)
     inc_dirs = train_seeds(inc_cfg, f"{stamp}-base")
@@ -206,11 +210,11 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
     # Std of a difference of two k-seed means ~ seed std * sqrt(2/k); the seed std from the range of k seeds.
     seed_sd = (max(by_seed) - min(by_seed)) / 1.128 if len(by_seed) > 1 else 0.0
     noise = seed_sd * math.sqrt(2 / len(seeds))
-    log({"kind": "noise_floor", "run": f"{stamp}-base", "exp_regret_by_seed": by_seed, "noise": noise,
+    log({"kind": "noise_floor", "run": f"{stamp}-base", "metric": METRIC, "by_seed": by_seed, "noise": noise,
          "val": inc_m, "seeds": list(seeds)})
-    tracker.log({"climb/noise_floor": noise, "climb/base_exp_regret": inc_m["exp_regret"]}, step=0)
-    tracker.alert(f"climb-{stamp}: base {inc_m['exp_regret']:.4f}, noise {noise:.4f}",
-                  f"val exp_regret by seed {[round(v, 4) for v in by_seed]}", level="info")
+    tracker.log({"climb/noise_floor": noise, f"climb/base_{METRIC}": inc_m[METRIC]}, step=0)
+    tracker.alert(f"climb-{stamp}: base {METRIC} {inc_m[METRIC]:.4f}, noise {noise:.4f}",
+                  f"val {METRIC} by seed {[round(v, 4) for v in by_seed]}", level="info")
     deploy = best_seed(inc_dirs, val0)
     save_incumbent(inc_cfg, deploy, inc_m, inc_dirs)
     runs = len(seeds)
@@ -235,24 +239,26 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
             b, mb, _ = score(inc_dirs, inc_val)
             diff, lo, hi = bootstrap_diff(a, b)
             keep = diff < -noise and hi < 0
-            log({"run": name, "kind": phase, "move": move, "val": ma, "incumbent_val": mb, "diff_exp_regret": diff,
+            log({"run": name, "kind": phase, "move": move, "metric": METRIC, "val": ma, "incumbent_val": mb,
+                 "diff": diff, "diff_exp_regret": diff,
                  "ci": [lo, hi], "noise": noise, "kept": keep, "n_val": len(ids), "seeds": list(seeds)})
-            tracker.log({"climb/candidate_exp_regret": ma["exp_regret"], "climb/incumbent_exp_regret": mb["exp_regret"],
+            tracker.log({"climb/candidate_metric": ma[METRIC], "climb/incumbent_metric": mb[METRIC],
+                         "climb/candidate_exp_regret": ma["exp_regret"], "climb/candidate_play_regret": ma["play_regret"],
                          "climb/diff": diff, "climb/ci_low": lo, "climb/ci_high": hi, "climb/kept": float(keep),
                          "climb/candidate_regret": ma["regret"], "climb/n_val": len(ids)}, step=runs)
-            moves_rows.append([name, phase, json.dumps(move), round(ma["exp_regret"], 4), round(mb["exp_regret"], 4),
+            moves_rows.append([name, phase, json.dumps(move), round(ma[METRIC], 4), round(mb[METRIC], 4),
                                round(diff, 4), round(lo, 4), round(hi, 4), keep, len(ids)])
             if keep:
                 inc_cfg, inc_dirs = cfg, cand_dirs
                 deploy = best_seed(inc_dirs, cand_val)
                 save_incumbent(inc_cfg, deploy, ma, inc_dirs)
-                tracker.alert(f"kept {json.dumps(move)}", f"val exp_regret {ma['exp_regret']:.4f}, diff {diff:+.4f} "
+                tracker.alert(f"kept {json.dumps(move)}", f"val {METRIC} {ma[METRIC]:.4f}, diff {diff:+.4f} "
                               f"[{lo:+.4f}, {hi:+.4f}] beyond noise {noise:.4f}", level="info")
                 tracker.log_artifact(deploy, name="railhead-17m", type="model", aliases=["incumbent", name])
                 if on_keep:
                     on_keep(cfg, deploy, ma)
                 if push:
-                    _git_push(f"Climb: keep {json.dumps(move)} (val exp_regret {ma['exp_regret']:.4f}, "
+                    _git_push(f"Climb: keep {json.dumps(move)} (val {METRIC} {ma[METRIC]:.4f}, "
                               f"diff {diff:+.4f} [{lo:+.4f}, {hi:+.4f}])",
                               [ledger, INCUMBENT, deploy.parent / "results.json", deploy.parent / "config.json"])
     _climb_report(tracker, stamp, moves_rows, inc_cfg, noise, runs)

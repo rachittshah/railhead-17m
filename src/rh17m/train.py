@@ -55,6 +55,7 @@ class TrainConfig:
     distill_temperature: float = 1.0  # extra temperature on the teacher's probabilities
     freeze_embeddings: bool = False  # keep the token embeddings at their pretrained values
     freeze_layers: int = 0  # freeze the first N encoder layers (-1: the whole encoder, train the heads only)
+    select_metric: str = "exp_regret"  # val metric that picks the epoch (exp_regret | play_regret | regret | nll)
 
 
 def _encode(tok, ex: dict, layout: str, perm: list[int] | None = None) -> B.EncodedDecision:
@@ -177,7 +178,7 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
     step = B.make_train_step(model, opt, compile=cfg.compile)
     train_dtype = mx.bfloat16 if cfg.bf16 else mx.float32
     val = splits["val"]
-    best = {"epoch": -1, "exp_regret": float("inf")}
+    best = {"epoch": -1, cfg.select_metric: float("inf")}
     best_params = None
     hist = (out_dir / "history.jsonl").open("w")
     tracker = _tracker(cfg, {"n_" + k: len(v) for k, v in splits.items()} | {"n_train_used": len(train),
@@ -212,8 +213,8 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
             m = metrics(val, vp)
             tracker.log_histogram("val/regret_hist", per_example(val, vp, "regret"), step=gstep)
             row.update({f"val_{k}": round(v, 5) for k, v in m.items()})
-            if m["exp_regret"] < best["exp_regret"]:
-                best = {"epoch": epoch, "exp_regret": m["exp_regret"]}
+            if m[cfg.select_metric] < best[cfg.select_metric]:
+                best = {"epoch": epoch, cfg.select_metric: m[cfg.select_metric]}
                 best_params = {k: mx.array(v) for k, v in B.state_dict(model).items()}
         hist.write(json.dumps(row) + "\n")
         hist.flush()
