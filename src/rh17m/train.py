@@ -140,7 +140,28 @@ def _lr(opt, index: int) -> float:
         return float("nan")
 
 
+def limit_mlx_cache() -> None:
+    """Cap MLX's buffer cache (RH17M_MLX_CACHE_GB, default 2). Uncapped, a long-lived process that trains
+    run after run (the climb) grew it to 21.6 GB of wired GPU memory and pushed the machine into swap."""
+    import os
+
+    gb = float(os.environ.get("RH17M_MLX_CACHE_GB", "2"))
+    (getattr(mx, "set_cache_limit", None) or mx.metal.set_cache_limit)(int(gb * 2**30))
+
+
+def clear_mlx_cache() -> None:
+    (getattr(mx, "clear_cache", None) or mx.metal.clear_cache)()
+
+
 def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
+    limit_mlx_cache()
+    try:
+        return _run(cfg, labels_dir, out_dir)
+    finally:
+        clear_mlx_cache()
+
+
+def _run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "config.json").write_text(json.dumps(asdict(cfg), indent=1))

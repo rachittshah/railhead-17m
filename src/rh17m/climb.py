@@ -23,7 +23,7 @@ from pathlib import Path
 
 from rh17m.dataset import DatasetConfig, load_examples
 from rh17m.evaluate import bootstrap_diff, metrics, per_example
-from rh17m.train import TrainConfig, predict, run
+from rh17m.train import TrainConfig, clear_mlx_cache, limit_mlx_cache, predict, run
 
 ROOT = Path(__file__).resolve().parents[2]
 CLIMB_DIR = ROOT / "runs" / "climb"
@@ -125,6 +125,8 @@ def _val_scores(model_dir: Path, val: list[dict]) -> tuple[list[float], dict]:
         t = json.loads((model_dir / "rh17m.json").read_text())["temperature"]
         for e, p in zip(todo, predict(model, todo, t), strict=True):
             _PRED_CACHE[(str(model_dir), _key(e))] = p
+        del model
+        clear_mlx_cache()
     probs = [_PRED_CACHE[(str(model_dir), _key(e))] for e in val]
     return per_example(val, probs, METRIC), metrics(val, probs)
 
@@ -177,6 +179,7 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
     CLIMB_DIR.mkdir(parents=True, exist_ok=True)
     ledger = CLIMB_DIR / "ledger.jsonl"
     stamp = time.strftime("%m%d-%H%M")
+    limit_mlx_cache()
 
     def log(row: dict) -> None:
         with ledger.open("a") as f:

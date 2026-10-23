@@ -21,6 +21,9 @@ class ModelPolicy:
 
         device = device or os.environ.get("RH17M_POLICY_DEVICE", "cpu")
         mx.set_default_device(mx.cpu if device == "cpu" else mx.gpu)
+        from rh17m.train import limit_mlx_cache
+
+        limit_mlx_cache()
         self.model_dir = Path(model_dir)
         self.model = B.load(str(model_dir), revision=None)
         meta = Path(model_dir) / "rh17m.json"
