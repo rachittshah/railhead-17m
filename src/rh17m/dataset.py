@@ -141,6 +141,8 @@ def observation(rendered_state: dict, candidates: list[dict], money0: int, cfg: 
 
 
 def build_example(rec: dict, cfg: DatasetConfig) -> dict | None:
+    if rec.get("uninformative"):
+        return None
     q, se = option_values(rec, cfg)
     if max(q.values()) - min(q.values()) < cfg.min_spread:
         return None

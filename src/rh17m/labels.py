@@ -45,7 +45,7 @@ class LabelConfig:
     chunks: int = 8  # 728 days: about two years, long enough for an air route to pay back
     max_air: int = 8
     planes: int = 2
-    version: str = "lbl-v2.1"  # v2.1: candidates carry the fastest eligible plane
+    version: str = "lbl-v2.2"  # v2.1: plane per candidate; v2.2: NO_SITE ladder step, no-build skip
 
 
 # How a chosen route is built: the first configuration the company can pay for. A large airport with two
@@ -54,7 +54,8 @@ class LabelConfig:
 # Only a refusal that spent nothing (no cash, or a type not available this year) moves down the ladder.
 BUILD_LADDER: tuple[tuple[str, int], ...] = (
     ("auto", 2), ("small", 2), ("commuter", 2), ("auto", 1), ("small", 1), ("commuter", 1))
-_NEXT_RUNG = ("ERR_NOT_ENOUGH_CASH", "ERR_TYPE_NOT_AVAILABLE")
+# ERR_NO_SITE also covers "no affordable site", which a cheaper airport type can fix.
+_NEXT_RUNG = ("ERR_NOT_ENOUGH_CASH", "ERR_TYPE_NOT_AVAILABLE", "ERR_NO_SITE")
 
 
 def build_affordable(world: World, a_town: int, b_town: int, ladder=BUILD_LADDER):
@@ -162,6 +163,13 @@ def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig()) -> 
         finally:
             parent.close()
         t_build = time.perf_counter() - t0
+        if cands and len(aliases) == len(cands):
+            # Nothing could be built, so every option is the hold world: no signal, no rollouts.
+            return {"version": cfg.version, "config": asdict(cfg), "state": asdict(meta), "seeds": seeds,
+                    "nw0": nw0, "money0": money0, "rendered_state": rendered,
+                    "candidates": [{**dataclasses.asdict(c), **extras.get(c.candidate_id, {})} for c in cands],
+                    "options": [c.candidate_id for c in cands] + [HOLD], "uninformative": "no_build",
+                    "builds": builds, "timing": {"build_s": round(t_build, 2), "total_s": round(t_build, 2)}}
         # No need to simulate past the end of the game (horizon + run-off year), where the arena scores.
         left = meta.end_date + 365 - meta.date
         chunks = max(1, min(cfg.chunks, -(-left // cfg.chunk_days)))
