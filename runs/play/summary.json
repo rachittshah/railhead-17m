@@ -1,0 +1,37 @@
+{
+ "tasks": [
+  "arena-dev-0212",
+  "arena-dev-0213",
+  "arena-dev-0214",
+  "arena-dev-0215",
+  "arena-dev-0218",
+  "arena-dev-0220",
+  "arena-dev-0221",
+  "arena-dev-0222",
+  "arena-dev-0230",
+  "arena-dev-0232",
+  "arena-dev-0233"
+ ],
+ "policies": {
+  "hold": {
+   "mean_score": 0.0,
+   "median_nw": -36300,
+   "games": 11
+  },
+  "longest": {
+   "mean_score": 0.4895,
+   "median_nw": 791245,
+   "games": 11
+  },
+  "longest_affordable": {
+   "mean_score": 0.0992,
+   "median_nw": -25300,
+   "games": 11
+  },
+  "random": {
+   "mean_score": 0.6892,
+   "median_nw": 5395517,
+   "games": 11
+  }
+ }
+}
