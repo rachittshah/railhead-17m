@@ -54,6 +54,12 @@ def _label(a: argparse.Namespace) -> int:
 
     cfg = LabelConfig(seeds=a.seeds, chunk_days=a.chunk_days, chunks=a.chunks, max_air=a.max_air)
     only = a.only.split(",") if a.only else None
+    if a.splits:
+        from rh17m.dataset import map_split
+        from rh17m.states import list_states
+
+        wanted = set(a.splits.split(","))
+        only = [s for s in (only or list_states(Path(a.root))) if map_split(s.split(".")[0]) in wanted]
     print(json.dumps(label_all(Path(a.root), Path(a.out), workers=a.workers, cfg=cfg, only=only,
                                order_seed=a.order_seed)))
     return 0
@@ -148,7 +154,7 @@ def _watch(a: argparse.Namespace) -> int:
     labels, states = Path(a.labels), Path(a.states)
     step, prev, t_prev = 0, None, time.time()
     while True:
-        recs = [p for p in labels.glob("arena*.json") if not p.name.endswith(".error.json")]
+        recs = [p for p in labels.glob("*.json") if not p.name.endswith(".error.json") and not p.name.startswith("_")]
         exs = load_examples(labels, DatasetConfig())
         now = time.time()
         rate = 0.0 if prev is None else (len(recs) - prev) / max(now - t_prev, 1) * 3600
@@ -191,6 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     lb.add_argument("--chunks", type=int, default=8)
     lb.add_argument("--max-air", type=int, default=8)
     lb.add_argument("--only", default="")
+    lb.add_argument("--splits", default="", help="comma list of dataset splits to label (train,val,test,ood)")
     lb.add_argument("--order-seed", type=int, default=0, help="queue shuffle; give parallel labellers different seeds")
     lb.set_defaults(fn=_label)
 
