@@ -17,7 +17,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import mlx.core as mx
-import mlx.optimizers as optim
 import numpy as np
 
 from rh17m import bekko_mlx as B
@@ -42,6 +41,8 @@ class TrainConfig:
     layouts: tuple[str, ...] = LAYOUTS
     seed: int = 0
     pad_multiple: int = 64
+    compile: bool = True  # traced train step (shapes bucketed by pad_multiple)
+    bf16: bool = True  # bf16 compute with fp32 master weights while training; evaluation runs in fp32
     train_splits: tuple[str, ...] = ("train",)
     max_train: int = 0  # 0 = all
 
@@ -101,20 +102,16 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
     tok = model.tokenizer
     steps_per_epoch = math.ceil(len(train) / cfg.batch_size)
     total = max(1, steps_per_epoch * cfg.epochs)
-    warm = max(1, int(cfg.warmup_frac * total))
-
-    def sched(peak):
-        return optim.join_schedules([optim.linear_schedule(peak * 0.01, peak, warm),
-                                     optim.cosine_decay(peak, max(1, total - warm), peak * 0.01)], [warm])
-
-    opt = B.make_optimizer(sched(cfg.lr), sched(cfg.head_lr), cfg.weight_decay)
-    step = B.make_train_step(model, opt)
+    opt = B.make_optimizer(cfg.lr, cfg.head_lr, cfg.weight_decay, total_steps=total, warmup_ratio=cfg.warmup_frac)
+    step = B.make_train_step(model, opt, compile=cfg.compile)
+    train_dtype = mx.bfloat16 if cfg.bf16 else mx.float32
     val = splits["val"]
     best = {"epoch": -1, "exp_regret": float("inf")}
     best_params = None
     hist = (out_dir / "history.jsonl").open("w")
     t0 = time.perf_counter()
     for epoch in range(cfg.epochs):
+        model.set_compute_dtype(train_dtype)
         order = list(range(len(train)))
         rng.shuffle(order)
         losses = []
@@ -128,6 +125,7 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
                 enc.append(_encode(tok, ex, rng.choice(cfg.layouts), perm))
             batch = B.collate(enc, tasks=model.tasks, pad_multiple=cfg.pad_multiple)
             losses.append(float(step(batch)))
+        model.set_compute_dtype(mx.float32)
         row = {"epoch": epoch, "loss": float(np.mean(losses)), "elapsed_s": round(time.perf_counter() - t0, 1)}
         if val:
             m = metrics(val, predict(model, val))
