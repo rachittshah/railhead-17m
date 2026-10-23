@@ -32,7 +32,14 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   - [x] MLX Bekko-17M port: parity 1.9e-6 vs PyTorch runtime, 5.4 ms/decision, 116 ex/s compiled bf16
   - [x] train.py (Trackio-tracked), climb.py (noise floor + paired bootstrap), play.py, hub publish
   - [x] Labels lbl-v2.2: NO_SITE ladder step, no-build states skip rollouts, rollouts stop at game end
-- Now: [→] accumulate labels (val needs ≥40 examples), then first real run + climb
+  - [x] Trackio: decision-mlx PR #7 merged (decision_mlx.tracking.Tracker, `evaluate --track`); rh17m
+        uses it (vendored fallback src/rh17m/_tracking.py until the local decision-mlx checkout has #7).
+        Dashboard: tmux rh17m-data:trackio, http://127.0.0.1:7860
+  - [x] Val = 3 local maps + hashed 1/8 of train maps (17 maps); 4,604 states harvested
+  - Early signal (51 ex): best option is rarely the longest (2/50) or hold (1/51); mostly 2nd-4th longest;
+    median best-worst spread 0.275 asinh
+- Now: [→] accumulate labels (val needs ≥40 examples), then first real run + climb; baseline games
+  running (tmux play-base, runs/play/baselines-w180)
 - Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
 - Remaining:
   - [ ] Closed-loop player (17M picks routes in full games) + paired eval on dev maps
