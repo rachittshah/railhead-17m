@@ -41,6 +41,11 @@ def coarse_moves() -> list[dict]:
         {"train_splits": ["train", "ood"]},
         {"data": {"scale": 1_000_000.0}}, {"data": {"scale": 20_000.0}},
         {"data": {"min_spread": 0.05}}, {"data": {"min_spread": 0.1}},
+        # Distillation over unlabelled train-map states: from the incumbent itself, and from the latest larger
+        # teacher (runs/teachers/current, e.g. Bekko-68M trained on the same labels) when one exists.
+        {"distill_from": "@incumbent", "distill_max": 1000},
+        {"distill_from": "@teacher", "distill_max": 1000},
+        {"distill_from": "@teacher", "distill_max": 4000},
     ]
 
 
@@ -50,9 +55,27 @@ def fine_moves(inc: TrainConfig) -> list[dict]:
             {"epochs": max(2, int(inc.epochs * 0.75))}, {"epochs": int(inc.epochs * 1.5)}]
 
 
-def apply(cfg: TrainConfig, move: dict, name: str) -> TrainConfig:
+TEACHER = ROOT / "runs" / "teachers" / "current"
+
+
+def resolve_teacher(ref: str, incumbent_dir: Path | None) -> str | None:
+    """``@incumbent`` -> the incumbent's model dir, ``@teacher`` -> runs/teachers/current (a symlink to a
+    trained model dir); anything else is returned unchanged. None when the reference cannot be resolved."""
+    if ref == "@incumbent":
+        return str(incumbent_dir) if incumbent_dir else None
+    if ref == "@teacher":
+        return str(TEACHER.resolve()) if TEACHER.exists() else None
+    return ref
+
+
+def apply(cfg: TrainConfig, move: dict, name: str, incumbent_dir: Path | None = None) -> TrainConfig | None:
     new = copy.deepcopy(cfg)
     new.name = name
+    if "distill_from" in move:
+        teacher = resolve_teacher(move["distill_from"], incumbent_dir)
+        if teacher is None:
+            return None
+        move = {**move, "distill_from": teacher}
     for k, v in move.items():
         if k == "data":
             new.data = {**new.data, **v}
@@ -134,7 +157,10 @@ def climb(base: TrainConfig, labels_dir: Path, noise_seeds: int = 3, max_runs: i
         for i, move in enumerate(moves):
             if runs >= max_runs:
                 return inc_cfg
-            cfg = apply(inc_cfg, move, f"{stamp}-{phase}{i:02d}")
+            cfg = apply(inc_cfg, move, f"{stamp}-{phase}{i:02d}", inc_dir)
+            if cfg is None:  # e.g. no teacher trained yet
+                log({"run": f"{stamp}-{phase}{i:02d}", "kind": phase, "move": move, "skipped": "unresolved"})
+                continue
             cand_dir = train(cfg)
             runs += 1
             val = [e for e in load_examples(labels_dir, DatasetConfig(**cfg.data)) if e["split"] == "val"]
