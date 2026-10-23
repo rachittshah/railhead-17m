@@ -35,7 +35,7 @@ def coarse_moves() -> list[dict]:
         {"head_lr": 1e-4}, {"head_lr": 2e-3},
         {"epochs": 4}, {"epochs": 16},
         {"batch_size": 8}, {"batch_size": 32},
-        {"data": {"features": False}}, {"data": {"drop_candidate_table": False}}, {"data": {"ranks": True}},
+        {"data": {"features": False}}, {"data": {"drop_candidate_table": False}}, {"data": {"ranks": True}}, {"data": {"plane": True}},
         {"shuffle_options": False}, {"layouts": ["instruction_state"]},
         {"weight_decay": 0.0}, {"weight_decay": 0.1},
         {"train_splits": ["train", "ood"]},

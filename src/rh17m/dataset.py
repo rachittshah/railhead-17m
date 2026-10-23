@@ -34,6 +34,7 @@ class DatasetConfig:
     features: bool = True  # describe affordability and the money left after the build in each option
     drop_candidate_table: bool = True  # the options already describe the candidates
     ranks: bool = False  # add each option's rank among the options (length, smaller town, cost)
+    plane: bool = False  # name the fastest eligible plane with its speed and capacity (labels from lbl-v2.1)
 
 
 def map_split(task_id: str) -> str:
@@ -120,7 +121,9 @@ def observation(rendered_state: dict, candidates: list[dict], money0: int, cfg: 
     """What a policy sees at a wake-up: the state text, the question and the options, plus the scripted
     baselines' features. The training examples and the online player both build it here, so the model reads
     the same text offline and in play."""
-    options = [(c["candidate_id"], describe(c, money0, cfg.features)) for c in candidates]
+    options = [(c["candidate_id"], describe(c, money0, cfg.features)
+                + (f"; plane {c['plane']} {c['speed']} km/h {c['capacity']} passengers"
+                   if cfg.plane and c.get("plane") else "")) for c in candidates]
     if cfg.ranks and candidates:
         options = [(k, f"{text}; {rank_text(candidates, i)}") for i, (k, text) in enumerate(options)]
     options.append((HOLD, "build nothing now and keep the cash"))

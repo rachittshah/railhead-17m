@@ -44,7 +44,7 @@ class LabelConfig:
     chunks: int = 8  # 728 days: about two years, long enough for an air route to pay back
     max_air: int = 8
     planes: int = 2
-    version: str = "lbl-v2"
+    version: str = "lbl-v2.1"  # v2.1: candidates carry the fastest eligible plane
 
 
 # How a chosen route is built: the first configuration the company can pay for. A large airport with two
@@ -67,6 +67,20 @@ def build_affordable(world: World, a_town: int, b_town: int, ladder=BUILD_LADDER
         if br.ok or br.cost or br.steps or not (br.failed_step or "").endswith(_NEXT_RUNG):
             break
     return br, cfg
+
+
+def candidate_extras(snap, cands, labels: dict[int, str]) -> dict[str, dict]:
+    """The fastest eligible passenger plane of each air candidate (what routes-v1 prices), by candidate id."""
+    from rhs1.candidates import _distance_sq, _passenger_plane
+
+    pass_id = next((k for k, v in labels.items() if v == "PASS"), None)
+    out = {}
+    for c in cands:
+        plane = _passenger_plane(snap, pass_id, _distance_sq(c.a, c.b))
+        out[c.candidate_id] = {} if plane is None else {
+            "plane": plane.get("name"), "speed": int(plane.get("speed") or 0),
+            "capacity": int(plane.get("capacity") or 0), "price": int(plane.get("price") or 0)}
+    return out
 
 
 def querier_for(world: World, task: TaskSpec, end_date: int):
@@ -121,6 +135,7 @@ def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig()) -> 
             cands = [c for c in enumerate_routes(snap, routes, max_per_mode=cfg.max_air, cargo_labels=labels)
                      if c.mode == "air"][: cfg.max_air]
             rendered = render_state(snap, routes, cands)
+            extras = candidate_extras(snap, cands, labels)
             nw0, money0 = _net_worth(parent)
             saves: dict[str, Path] = {HOLD: parent.save(tmp / "opt-hold.sav")}
             builds: dict[str, dict] = {HOLD: {"ok": True, "cost": 0, "failed_step": None}}
@@ -155,7 +170,8 @@ def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig()) -> 
     return {
         "version": cfg.version, "config": asdict(cfg), "state": asdict(meta), "seeds": seeds,
         "nw0": nw0, "money0": money0, "rendered_state": rendered,
-        "candidates": [dataclasses.asdict(c) for c in cands], "options": [c.candidate_id for c in cands] + [HOLD],
+        "candidates": [{**dataclasses.asdict(c), **extras.get(c.candidate_id, {})} for c in cands],
+        "options": [c.candidate_id for c in cands] + [HOLD],
         "outcomes": outcomes,
         "timing": {"build_s": round(t_build, 2), "total_s": round(time.perf_counter() - t0, 2)},
     }

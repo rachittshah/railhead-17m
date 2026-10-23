@@ -24,7 +24,7 @@ from railhead.task import TaskSpec
 from railhead.world import World
 
 from rh17m.dataset import HOLD, DatasetConfig, observation
-from rh17m.labels import LabelConfig, build_affordable, querier_for
+from rh17m.labels import LabelConfig, build_affordable, candidate_extras, querier_for
 from rh17m.states import find_task
 
 Policy = Callable[[dict], dict[str, float]]
@@ -41,7 +41,8 @@ def wakeup_observation(world: World, task: TaskSpec, end_date: int, max_air: int
     cands = [c for c in enumerate_routes(snap, routes, max_per_mode=max_air, cargo_labels=labels)
              if c.mode == "air"][:max_air]
     money0 = int(world.call("company").get("money") or 0)
-    cand_dicts = [asdict(c) for c in cands]
+    extras = candidate_extras(snap, cands, labels)
+    cand_dicts = [{**asdict(c), **extras.get(c.candidate_id, {})} for c in cands]
     return observation(render_state(snap, routes, cands), cand_dicts, money0, dcfg), cands
 
 
