@@ -1,9 +1,7 @@
 {
  "config": {
-  "name": "1023-1606-coarse02",
-  "data": {
-   "tau": 0.1
-  },
+  "name": "1023-1713-coarse05",
+  "data": {},
   "init": "bekko",
   "epochs": 8,
   "batch_size": 16,
@@ -29,8 +27,8 @@
    "train"
   ],
   "max_train": 0,
-  "distill_from": "",
-  "distill_max": 0,
+  "distill_from": "/Users/rachitt/railhead-17m/runs/train/1023-1713-base-s2/model",
+  "distill_max": 1000,
   "distill_temperature": 1.0,
   "obs_dir": "obs-v3",
   "freeze_embeddings": false,
@@ -38,23 +36,23 @@
   "select_metric": "exp_regret",
   "patience": 3
  },
- "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-1606-coarse02-s1/model",
+ "model_dir": "/Users/rachitt/railhead-17m/runs/train/1023-1713-coarse05-s2/model",
  "val": {
-  "regret": 0.23326536510302556,
-  "exp_regret": 0.28428664708960133,
-  "capture": 0.16697789994076642,
-  "hit": 0.3177083333333333,
-  "nll": 2.168168419216853,
-  "conf": 0.15075978977988128,
+  "regret": 0.2474923264769648,
+  "exp_regret": 0.32220110835301646,
+  "capture": 0.18562936386523432,
+  "hit": 0.28703703703703703,
+  "nll": 2.1839716315146753,
+  "conf": 0.16055539724179926,
   "pick_hold": 0.0,
-  "play_regret": 0.21265529661468985,
-  "ece": 0.1679468832824105,
-  "n": 128.0
+  "play_regret": 0.21953971995599716,
+  "ece": 0.12725203557938616,
+  "n": 180.0
  },
  "seed_dirs": [
-  "/Users/rachitt/railhead-17m/runs/train/1023-1606-coarse02-s0/model",
-  "/Users/rachitt/railhead-17m/runs/train/1023-1606-coarse02-s1/model",
-  "/Users/rachitt/railhead-17m/runs/train/1023-1606-coarse02-s2/model"
+  "/Users/rachitt/railhead-17m/runs/train/1023-1713-coarse05-s0/model",
+  "/Users/rachitt/railhead-17m/runs/train/1023-1713-coarse05-s1/model",
+  "/Users/rachitt/railhead-17m/runs/train/1023-1713-coarse05-s2/model"
  ],
- "saved": "2026-10-23 16:27:10"
+ "saved": "2026-10-23 19:09:55"
 }
