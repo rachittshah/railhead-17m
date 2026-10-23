@@ -30,7 +30,7 @@ LAYOUTS = ("instruction_state", "state_instruction")
 class TrainConfig:
     name: str = "run"
     data: dict = field(default_factory=dict)  # DatasetConfig overrides
-    init: str = "bekko"  # bekko (the pinned release) | <path to a saved model dir>
+    init: str = "bekko"  # bekko (17M) | bekko-68m | bekko-400m | <path to a saved model dir>
     epochs: int = 8
     batch_size: int = 16
     lr: float = 1e-4
@@ -83,8 +83,19 @@ def fit_temperature(examples: list[dict], probs: list[dict[str, float]]) -> floa
     return min(grid, key=lambda t: metrics(examples, [temper(p, t) for p in probs])["nll"])
 
 
+# Published Bekko v0 releases (decision_mlx.bekko_provider pins the same revisions).
+RELEASES = {
+    "bekko": ("hotchpotch/bekko-system-one-v0-17m", B.REVISION),
+    "bekko-68m": ("hotchpotch/bekko-system-one-v0-68m", "ab7685f23e5edbc1acb12ced4f2c4e12591efa69"),
+    "bekko-400m": ("hotchpotch/bekko-system-one-v0-400m", "1960df5602bd93cc8d336fdebd9fb68a30926e13"),
+}
+
+
 def _load(init: str):
-    return B.load() if init == "bekko" else B.load(init, revision=None)
+    if init in RELEASES:
+        repo, revision = RELEASES[init]
+        return B.load(repo, revision=revision)
+    return B.load(init, revision=None)
 
 
 TRACK_PROJECT = "railhead-17m"
