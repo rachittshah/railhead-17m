@@ -54,7 +54,8 @@ def _label(a: argparse.Namespace) -> int:
 
     cfg = LabelConfig(seeds=a.seeds, chunk_days=a.chunk_days, chunks=a.chunks, max_air=a.max_air)
     only = a.only.split(",") if a.only else None
-    print(json.dumps(label_all(Path(a.root), Path(a.out), workers=a.workers, cfg=cfg, only=only)))
+    print(json.dumps(label_all(Path(a.root), Path(a.out), workers=a.workers, cfg=cfg, only=only,
+                               order_seed=a.order_seed)))
     return 0
 
 
@@ -159,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     lb.add_argument("--chunks", type=int, default=8)
     lb.add_argument("--max-air", type=int, default=8)
     lb.add_argument("--only", default="")
+    lb.add_argument("--order-seed", type=int, default=0, help="queue shuffle; give parallel labellers different seeds")
     lb.set_defaults(fn=_label)
 
     bl = sub.add_parser("baselines", help="baseline policies on the labelled decisions")

@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import multiprocessing as mp
+import os
 import random
 import tempfile
 import time
@@ -186,11 +187,32 @@ def _write_atomic(path: Path, obj: dict) -> None:
     tmp.rename(path)
 
 
+CLAIM_TTL_S = 3600
+
+
+def claim(out_dir: Path, state_id: str) -> bool:
+    """Atomically claim a state so concurrent labellers never duplicate work. A claim older than
+    ``CLAIM_TTL_S`` belongs to a dead run and is taken over."""
+    d = Path(out_dir) / ".claims"
+    d.mkdir(exist_ok=True)
+    path = d / state_id
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        if time.time() - path.stat().st_mtime < CLAIM_TTL_S:
+            return False
+        path.unlink(missing_ok=True)
+        return claim(out_dir, state_id)
+    os.write(fd, str(os.getpid()).encode())
+    os.close(fd)
+    return True
+
+
 def _job(args: tuple) -> dict:
     root, state_id, out_dir, cfg_d = args
     cfg = LabelConfig(**cfg_d)
     dest = Path(out_dir) / f"{state_id}.json"
-    if dest.exists():
+    if dest.exists() or not claim(Path(out_dir), state_id):
         return {"state_id": state_id, "skipped": True}
     try:
         rec = label_state(Path(root), state_id, cfg)
@@ -203,13 +225,13 @@ def _job(args: tuple) -> dict:
 
 
 def label_all(root: Path, out_dir: Path, workers: int = 8, cfg: LabelConfig = LabelConfig(),
-              only: list[str] | None = None) -> dict:
+              only: list[str] | None = None, order_seed: int = 0) -> dict:
     """Label every state in ``root`` without a record in ``out_dir``, ``workers`` states at a time."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     todo = [s for s in (only or list_states(root)) if not (out_dir / f"{s}.json").exists()]
     # A fixed shuffle, so every split and source fills at the same rate instead of in name order.
-    random.Random(0).shuffle(todo)
+    random.Random(order_seed).shuffle(todo)
     progress = out_dir / "_progress.log"
     done = failed = 0
     t0 = time.perf_counter()
@@ -218,6 +240,8 @@ def label_all(root: Path, out_dir: Path, workers: int = 8, cfg: LabelConfig = La
         for r in pool.imap_unordered(_job, jobs):
             done += bool(r.get("ok"))
             failed += r.get("ok") is False
+            if r.get("skipped"):
+                continue
             line = json.dumps({**r, "done": done, "failed": failed, "todo": len(todo),
                                "elapsed_s": round(time.perf_counter() - t0, 1)})
             with progress.open("a") as f:
