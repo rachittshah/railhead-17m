@@ -34,9 +34,16 @@ def _states(a: argparse.Namespace) -> int:
         tasks = a.tasks or sorted(p.name for p in S.TASKS_ROOT.glob("arena-*-02*"))
         if a.tasks == ["hub"]:
             tasks = sorted(p.parent.name for p in S.HUB_TASKS_ROOT.glob("*/start.sav"))
+        elif a.tasks == ["train"]:  # every map of the train split, local and Hub
+            from rh17m.dataset import map_split
+
+            names = {p.parent.name for root in S.TASK_ROOTS for p in root.glob("*/start.sav")}
+            tasks = sorted(t for t in names if map_split(t) == "train" and ("arena" in t or "tycoon" in t))
         policies = ["random", "longest", "mix"] if a.policy == "all" else [a.policy]
+        if a.policy == "model":
+            policies = [f"model:{a.model}"]
         for r in S.selfplay_many(tasks, root, list(range(a.seed0, a.seed0 + a.games)), policies,
-                                 max_states=a.max_states, workers=a.workers):
+                                 max_states=a.max_states, workers=a.workers, epsilon=a.epsilon):
             print(json.dumps(r), flush=True)
     return 0
 
@@ -216,7 +223,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("source", choices=["teacher", "hub-teacher", "start", "selfplay"])
     s.add_argument("--root", default=str(DATA / "states"))
     s.add_argument("--tasks", nargs="*", default=[])
-    s.add_argument("--policy", default="all", choices=["all", "mix", "random", "longest"])
+    s.add_argument("--policy", default="all", choices=["all", "mix", "random", "longest", "model"])
+    s.add_argument("--model", default="", help="model dir for --policy model (DAgger self-play)")
+    s.add_argument("--epsilon", type=float, default=0.2, help="exploration rate of --policy model")
     s.add_argument("--workers", type=int, default=6)
     s.add_argument("--games", type=int, default=1)
     s.add_argument("--seed0", type=int, default=1)

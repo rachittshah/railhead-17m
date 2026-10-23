@@ -139,22 +139,31 @@ def harvest_teacher(task_id: str, model: str, log_path: Path, root: Path,
 
 # ---------------------------------------------------------------------- self-play
 def selfplay(task_id: str, root: Path, seed: int, policy: str = "mix", max_states: int = 30,
-             p_build: float = 0.6) -> list[StateMeta]:
-    """Play a scripted company and save a state at every wake-up.
+             p_build: float = 0.6, epsilon: float = 0.2) -> list[StateMeta]:
+    """Play a company and save a state at every wake-up.
 
-    ``policy``: ``random`` builds a uniformly random air candidate, ``longest`` the longest-band one,
-    ``mix`` flips a coin per build. Waits are drawn from 30-365 days. The engine is reseeded with ``seed`` so
-    games on the same map diverge."""
-    from rhs1.builders.air import AirPlan, build_air_route
+    ``policy``: ``random`` builds a uniformly random air candidate, ``longest`` the longest one, ``mix`` flips a
+    coin per build; ``model:<model dir>`` asks the trained model at every wake-up (it may hold) and explores
+    with a random option with probability ``epsilon`` (DAgger: states from the policy's own distribution).
+    Routes are built with the label engine's cash ladder. Waits are 30-365 days (model: 90 or 180, like play).
+    The engine is reseeded with ``seed`` so games on the same map diverge."""
     from rhs1.candidates import enumerate_routes
     from rhs1.snapshot import aggregate_routes, take_snapshot
 
-    from rh17m.labels import querier_for
+    from rh17m.labels import build_affordable, querier_for
 
     task_dir = find_task(task_id)
     task = TaskSpec.load(task_dir)
     rng = random.Random(seed)
-    prefix = f"{task_id}.selfplay-{policy}-s{seed}"
+    model = None
+    tag = policy
+    if policy.startswith("model:"):
+        from rh17m.policy import ModelPolicy
+
+        model_dir = Path(policy.split(":", 1)[1])
+        model = ModelPolicy(model_dir)
+        tag = f"model-{model_dir.parent.name}"
+    prefix = f"{task_id}.selfplay-{tag}-s{seed}"
     marker = Path(root) / f".{prefix}.done"
     if marker.exists():
         return [load_meta(root, p.stem) for p in sorted(Path(root).glob(f"{prefix}.w*.json"))]
@@ -168,42 +177,64 @@ def selfplay(task_id: str, root: Path, seed: int, policy: str = "mix", max_state
             end_date = int(world.state()["date"]) + task.horizon_days
             while len(out) < max_states and int(world.state()["date"]) < end_date:
                 out.append(save_state(world, Path(root), f"{prefix}.w{len(out):03d}", task,
-                                      f"selfplay:{policy}", end_date))
-                if rng.random() < p_build:
-                    query = querier_for(world, task, end_date)
-                    snap = take_snapshot(query)
+                                      f"selfplay:{tag}", end_date))
+                pick = None
+                if model is not None:
+                    from rh17m.play import wakeup_observation
+
+                    obs, cands = wakeup_observation(world, task, end_date, 8, model_dcfg(model))
+                    keys = [k for k, _ in obs["options"]]
+                    if rng.random() < epsilon:
+                        key = rng.choice(keys)
+                    else:
+                        probs = model(obs)
+                        key = max(probs, key=lambda k: (probs[k], k == "hold"))
+                    pick = next((c for c in cands if c.candidate_id == key), None)
+                elif rng.random() < p_build:
+                    snap = take_snapshot(querier_for(world, task, end_date))
                     labels = {c["id"]: c["label"] for c in world.call("cargos")}
                     cands = [c for c in enumerate_routes(snap, aggregate_routes(snap), max_per_mode=8,
                                                          cargo_labels=labels) if c.mode == "air"]
                     if cands:
                         pick_longest = policy == "longest" or (policy == "mix" and rng.random() < 0.5)
-                        c = max(cands, key=lambda c: c.length_tiles) if pick_longest else rng.choice(cands)
-                        try:
-                            build_air_route(world, AirPlan(c.a["id"], c.b["id"], "auto", 2, -1))
-                        except BridgeError as e:  # builder reports failures itself; guard the unexpected
-                            log.warning("selfplay build raised %s", e)
-                world.step(days=rng.choice((30, 60, 90, 180, 365)))
+                        pick = max(cands, key=lambda c: c.length_tiles) if pick_longest else rng.choice(cands)
+                if pick is not None:
+                    try:
+                        build_affordable(world, pick.a["id"], pick.b["id"])
+                    except BridgeError as e:  # builder reports failures itself; guard the unexpected
+                        log.warning("selfplay build raised %s", e)
+                waits = (90, 180) if model is not None else (30, 60, 90, 180, 365)
+                world.step(days=rng.choice(waits))
         finally:
             world.close()
     marker.write_text(json.dumps({"states": len(out)}))
     return out
 
 
+def model_dcfg(model):
+    """The DatasetConfig the model was trained with (its rh17m.json), so self-play renders the same text."""
+    from rh17m.dataset import DatasetConfig
+
+    meta = Path(model.model_dir) / "rh17m.json"
+    data = json.loads(meta.read_text()).get("data", {}) if meta.exists() else {}
+    return DatasetConfig(**data)
+
+
 def _selfplay_job(args: tuple) -> dict:
-    task_id, root, seed, policy, max_states = args
+    task_id, root, seed, policy, max_states, epsilon = args
     try:
-        got = selfplay(task_id, Path(root), seed, policy=policy, max_states=max_states)
+        got = selfplay(task_id, Path(root), seed, policy=policy, max_states=max_states, epsilon=epsilon)
         return {"task": task_id, "seed": seed, "policy": policy, "states": len(got)}
     except Exception as e:  # noqa: BLE001 - a crashed game loses its own states only
         return {"task": task_id, "seed": seed, "policy": policy, "error": repr(e)}
 
 
 def selfplay_many(task_ids: list[str], root: Path, seeds: list[int], policies: list[str],
-                  max_states: int = 30, workers: int = 6) -> Iterator[dict]:
+                  max_states: int = 30, workers: int = 6, epsilon: float = 0.2) -> Iterator[dict]:
     """Every (task, seed, policy) game, ``workers`` at a time; yields one summary per finished game."""
     import multiprocessing as mp
 
-    jobs = [(t, str(root), s, p, max_states) for s in seeds for p in policies for t in task_ids]
+    jobs = [(t, str(root), s, p, max_states, epsilon) for s in seeds for p in policies for t in task_ids]
     with mp.get_context("spawn").Pool(workers) as pool:
         yield from pool.imap_unordered(_selfplay_job, jobs)
 

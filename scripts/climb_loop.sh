@@ -32,6 +32,10 @@ while [[ ! -f data/labels/.stop ]]; do
       $R play-report --track >> data/logs/climb_loop.log 2>&1
       git add runs/play/summary.json && git commit -q -m "Closed loop: ${run:t} on the dev maps" && git push -q
       $R publish model --run "$run" >> data/logs/publish.log 2>&1 || echo "$(date +%H:%M) publish skipped (hf auth?)" >> data/logs/climb_loop.log
+      # DAgger: the incumbent plays every train map once (epsilon-greedy); the train labeller takes these first.
+      echo "$(date +%H:%M) dagger self-play with ${run:t}" >> data/logs/climb_loop.log
+      nice -n 5 $R states selfplay --tasks train --policy model --model "$inc" --games 1 --max-states 12 \
+        --workers 3 --seed0 $(( $(date +%s) % 100000 )) >> data/logs/dagger.log 2>&1
     fi
     last=$n
   fi

@@ -11,6 +11,7 @@ from rh17m.train import LAYOUTS, temper
 
 class ModelPolicy:
     def __init__(self, model_dir: Path, layout: str = LAYOUTS[0]):
+        self.model_dir = Path(model_dir)
         self.model = B.load(str(model_dir), revision=None)
         meta = Path(model_dir) / "rh17m.json"
         self.temperature = json.loads(meta.read_text())["temperature"] if meta.exists() else 1.0

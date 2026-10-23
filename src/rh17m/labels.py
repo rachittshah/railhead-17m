@@ -241,8 +241,10 @@ def label_all(root: Path, out_dir: Path, workers: int = 8, cfg: LabelConfig = La
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     todo = [s for s in (only or list_states(root)) if not (out_dir / f"{s}.json").exists()]
-    # A fixed shuffle, so every split and source fills at the same rate instead of in name order.
+    # A fixed shuffle, so every split and source fills at the same rate instead of in name order; states the
+    # model reached in its own play (DAgger) go first, because they are the distribution it must get right.
     random.Random(order_seed).shuffle(todo)
+    todo.sort(key=lambda s: ".selfplay-model-" not in s)
     progress = out_dir / "_progress.log"
     done = failed = 0
     t0 = time.perf_counter()
