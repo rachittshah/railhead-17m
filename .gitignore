@@ -18,3 +18,4 @@ runs/play-v1/
 runs/climb/last_n
 runs/play-v2/
 runs/play-devhub/*/
+runs/climb/incumbent.prev.json

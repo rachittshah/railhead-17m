@@ -290,3 +290,38 @@ def track_report(play_root: Path, summary: dict) -> None:
         t.alert(f"closed loop: best policy is {best}", f"mean scores {json.dumps({k: v['mean_score'] for k, v in pol.items()})}",
                 level=level)
     t.finish()
+
+
+def run_name(model_dir: str) -> str:
+    """runs/train/<run>/model -> <run>; a comma-separated ensemble -> 'ens-' + the first run."""
+    first = Path(str(model_dir).split(",")[0])
+    name = first.parent.name if first.name == "model" else first.name
+    return ("ens-" if "," in str(model_dir) else "") + name
+
+
+def gate(candidate: str, reference: str, tasks: list[str], seeds: list[int], root: Path, wake_days: int = 180,
+         workers: int = 3) -> dict:
+    """Closed-loop gate: play both models on ``tasks`` x ``seeds`` (games already on disk are reused) and
+    compare mean asinh(final net worth) per map, paired, with a bootstrap interval. The candidate is rejected
+    only when it is significantly worse (interval entirely below zero)."""
+    import math
+    import statistics
+
+    from rh17m.evaluate import bootstrap_diff
+
+    per_map = {}
+    for model in (candidate, reference):
+        out = Path(root) / run_name(model)
+        for _ in tournament(tasks, ["model"], seeds, out, wake_days=wake_days, workers=workers, model_dir=model):
+            pass
+        games: dict[str, list[float]] = {}
+        for f in out.glob("model.*.json"):
+            r = json.loads(f.read_text())
+            if r["task"] in tasks and r["seed"] in seeds:
+                games.setdefault(r["task"], []).append(math.asinh(r["final_nw"] / 1e5))
+        per_map[model] = {t: statistics.mean(v) for t, v in games.items()}
+    shared = sorted(set(per_map[candidate]) & set(per_map[reference]))
+    d, lo, hi = bootstrap_diff([per_map[candidate][t] for t in shared], [per_map[reference][t] for t in shared])
+    return {"candidate": run_name(candidate), "reference": run_name(reference), "maps": len(shared),
+            "seeds": seeds, "diff_asinh_nw": round(d, 4), "ci": [round(lo, 4), round(hi, 4)],
+            "verdict": "reject" if hi < 0 else "accept"}

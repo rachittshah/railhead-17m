@@ -224,6 +224,23 @@ def _play_report(a: argparse.Namespace) -> int:
     return 0
 
 
+def _gate(a: argparse.Namespace) -> int:
+    import time
+
+    from rh17m.play import gate
+    from rh17m.states import HUB_TASKS_ROOT
+
+    tasks = sorted(p.parent.name for p in HUB_TASKS_ROOT.glob("*-dev-*/start.sav")
+                   if json.loads((p.parent / "task.json").read_text())["scenario"].get("map_log2", 0) >= 8)
+    res = gate(a.candidate, a.reference, tasks, list(range(1, 1 + a.seeds)), Path(a.root), workers=a.workers)
+    res["at"] = time.strftime("%Y-%m-%d %H:%M")
+    print(json.dumps(res))
+    log = Path(__file__).resolve().parents[2] / "runs" / "climb" / "gates.jsonl"
+    with log.open("a") as f:
+        f.write(json.dumps(res) + "\n")
+    return 0 if res["verdict"] == "accept" else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(prog="rh17m")
@@ -316,6 +333,14 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--root", default=str(Path(__file__).resolve().parents[2] / "runs" / "play"))
     pr.add_argument("--track", action="store_true", help="also log tables, curve images and a report to Trackio")
     pr.set_defaults(fn=_play_report)
+
+    gt = sub.add_parser("gate", help="closed-loop gate: candidate vs reference model on the devhub maps")
+    gt.add_argument("--candidate", required=True)
+    gt.add_argument("--reference", required=True)
+    gt.add_argument("--seeds", type=int, default=2)
+    gt.add_argument("--workers", type=int, default=3)
+    gt.add_argument("--root", default=str(Path(__file__).resolve().parents[2] / "runs" / "play-devhub"))
+    gt.set_defaults(fn=_gate)
 
     b = sub.add_parser("bench", help="simulator throughput")
     b.add_argument("rest", nargs=argparse.REMAINDER)
