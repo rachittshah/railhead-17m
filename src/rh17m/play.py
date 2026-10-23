@@ -182,13 +182,24 @@ def report(play_root: Path) -> dict:
     if not games:
         return {}
     shared = set.intersection(*(set(v) for v in games.values()))
+    import math
+
+    from rh17m.evaluate import bootstrap_diff
+
     out = {"tasks": sorted(shared), "policies": {}}
+    lognw = {label: [statistics.mean(math.asinh(g["final_nw"] / 1e5) for g in by_task[t]) for t in sorted(shared)]
+             for label, by_task in games.items()}
     for label, by_task in games.items():
         scores = [statistics.mean(g["score"] for g in by_task[t]) for t in sorted(shared)]
         nws = [statistics.mean(g["final_nw"] for g in by_task[t]) for t in sorted(shared)]
-        out["policies"][label] = {"mean_score": round(statistics.mean(scores), 4) if scores else None,
-                                  "median_nw": round(statistics.median(nws)) if nws else None,
-                                  "games": sum(len(by_task[t]) for t in shared)}
+        row = {"mean_score": round(statistics.mean(scores), 4) if scores else None,
+               "median_nw": round(statistics.median(nws)) if nws else None,
+               "mean_asinh_nw": round(statistics.mean(lognw[label]), 4) if shared else None,
+               "games": sum(len(by_task[t]) for t in shared)}
+        if "random" in lognw and label != "random" and len(shared) > 1:
+            d, lo, hi = bootstrap_diff(lognw[label], lognw["random"])
+            row["vs_random_asinh_nw"] = [round(d, 4), round(lo, 4), round(hi, 4)]
+        out["policies"][label] = row
     return out
 
 

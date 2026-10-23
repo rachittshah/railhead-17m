@@ -108,8 +108,14 @@ def _train(a: argparse.Namespace) -> int:
 
 def _play(a: argparse.Namespace) -> int:
     from rh17m.play import tournament
+    from rh17m.states import HUB_TASKS_ROOT
 
     tasks = a.tasks
+    if tasks == ["devhub"]:  # Hub dev maps of 256x256 or more (5-year games: fast, so many games per policy;
+        import json as _json  # smaller maps rarely have towns big enough for air routes)
+
+        tasks = sorted(p.parent.name for p in HUB_TASKS_ROOT.glob("*-dev-*/start.sav")
+                       if _json.loads((p.parent / "task.json").read_text())["scenario"].get("map_log2", 0) >= 8)
     for r in tournament(tasks, a.policies, list(range(a.seed0, a.seed0 + a.seeds)), Path(a.out),
                         wake_days=a.wake_days, workers=a.workers, model_dir=a.model):
         print(json.dumps({k: r[k] for k in ("policy", "task", "seed", "final_nw", "score", "builds", "built_ok")}),
