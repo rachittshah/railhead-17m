@@ -21,6 +21,14 @@ def test_teacher_references_resolve_or_skip(tmp_path):
 
 
 def test_every_coarse_move_names_a_real_setting():
-    fields = set(TrainConfig.__dataclass_fields__)
+    fields = set(TrainConfig.__dataclass_fields__) | {"_control"}
     for move in coarse_moves():
         assert set(move) <= fields, move
+
+
+def test_control_move_changes_nothing():
+    from rh17m.climb import CONTROL
+
+    base = TrainConfig(data={"tau": 0.05}, lr=2e-4)
+    same = apply(base, CONTROL, "c")
+    assert same.data == base.data and same.lr == base.lr and same.name == "c"

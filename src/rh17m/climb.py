@@ -29,8 +29,12 @@ ROOT = Path(__file__).resolve().parents[2]
 CLIMB_DIR = ROOT / "runs" / "climb"
 
 
+CONTROL = {"_control": True}  # A/A: the incumbent config retrained now; any "gain" it shows is bias or noise
+
+
 def coarse_moves() -> list[dict]:
     return [
+        CONTROL,
         {"data": {"tau": 0.02}}, {"data": {"tau": 0.1}}, {"data": {"tau": 0.2}},
         {"lr": 3e-5}, {"lr": 3e-4},
         {"head_lr": 1e-4}, {"head_lr": 2e-3},
@@ -81,6 +85,8 @@ def apply(cfg: TrainConfig, move: dict, name: str, incumbent_dir: Path | None = 
             return None
         move = {**move, "distill_from": teacher}
     for k, v in move.items():
+        if k == "_control":
+            continue
         if k == "data":
             new.data = {**new.data, **v}
         else:
@@ -170,7 +176,7 @@ def save_incumbent(cfg: TrainConfig, model_dir: Path, val: dict, seed_dirs: list
 
 
 def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), max_runs: int = 60,
-          push: bool = True, on_keep=None) -> TrainConfig:
+          push: bool = True, on_keep=None, only_control: bool = False) -> TrainConfig:
     """One climb pass. Every config (the incumbent and each candidate) is trained once per seed in ``seeds``;
     a config's score on a val example is its mean expected regret over those seed models, so candidate and
     incumbent are compared like for like (a best-of-seeds incumbent would be a winner's curse). A move is
@@ -236,7 +242,8 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
     deploy = best_seed(inc_dirs, val0)
     save_incumbent(inc_cfg, deploy, inc_m, inc_dirs)
     runs = len(seeds)
-    for phase, moves in (("coarse", coarse_moves()), ("fine", None)):
+    plan = (("control", [CONTROL]),) if only_control else (("coarse", coarse_moves()), ("fine", None))
+    for phase, moves in plan:
         moves = moves if moves is not None else fine_moves(inc_cfg)
         for i, move in enumerate(moves):
             if runs >= max_runs:
@@ -256,7 +263,11 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
             a, ma, _ = score(cand_dirs, cand_val)
             b, mb, _ = score(inc_dirs, inc_val)
             diff, lo, hi = bootstrap_diff(a, b)
-            keep = diff < -noise and hi < 0
+            keep = diff < -noise and hi < 0 and "_control" not in move
+            if "_control" in move:
+                tracker.alert(f"A/A control: diff {diff:+.4f} [{lo:+.4f}, {hi:+.4f}]",
+                              "the unchanged config retrained now vs the incumbent; |diff| beyond noise means bias",
+                              level="info" if lo <= 0 <= hi else "warn")
             log({"run": name, "kind": phase, "move": move, "metric": METRIC, "val": ma, "incumbent_val": mb,
                  "diff": diff, "diff_exp_regret": diff,
                  "ci": [lo, hi], "noise": noise, "kept": keep, "n_val": len(ids), "seeds": list(seeds)})
