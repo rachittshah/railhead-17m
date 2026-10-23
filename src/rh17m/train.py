@@ -53,6 +53,8 @@ class TrainConfig:
     distill_from: str = ""  # teacher (run model dir or release name) that soft-labels unlabelled train states
     distill_max: int = 0  # cap on teacher-labelled examples (0 = all available)
     distill_temperature: float = 1.0  # extra temperature on the teacher's probabilities
+    freeze_embeddings: bool = False  # keep the token embeddings at their pretrained values
+    freeze_layers: int = 0  # freeze the first N encoder layers (-1: the whole encoder, train the heads only)
 
 
 def _encode(tok, ex: dict, layout: str, perm: list[int] | None = None) -> B.EncodedDecision:
@@ -118,6 +120,18 @@ def _tracker(cfg: TrainConfig, extra: dict):
                    enabled=cfg.track, system_interval=2.0)
 
 
+def _freeze(model, cfg: TrainConfig) -> None:
+    """Regularise small-data fine-tuning by keeping the lower encoder at its pretrained weights."""
+    backbone = model.encoder.backbone
+    if cfg.freeze_layers < 0:
+        model.encoder.freeze()
+        return
+    if cfg.freeze_embeddings and hasattr(backbone, "embeddings"):
+        backbone.embeddings.freeze()
+    for layer in list(backbone.layers)[: cfg.freeze_layers]:
+        layer.freeze()
+
+
 def _lr(opt, index: int) -> float:
     try:
         return float(opt.optimizers[index].learning_rate)
@@ -156,6 +170,7 @@ def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
     mx.random.seed(cfg.seed)
     model = _load(cfg.init)
     tok = model.tokenizer
+    _freeze(model, cfg)
     steps_per_epoch = math.ceil(len(train) / cfg.batch_size)
     total = max(1, steps_per_epoch * cfg.epochs)
     opt = B.make_optimizer(cfg.lr, cfg.head_lr, cfg.weight_decay, total_steps=total, warmup_ratio=cfg.warmup_frac)

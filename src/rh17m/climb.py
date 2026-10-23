@@ -42,6 +42,8 @@ def coarse_moves() -> list[dict]:
         {"train_splits": ["train", "ood"]},
         {"data": {"scale": 1_000_000.0}}, {"data": {"scale": 20_000.0}},
         {"data": {"min_spread": 0.05}}, {"data": {"min_spread": 0.1}},
+        # Regularisation for small data: keep the lower encoder pretrained.
+        {"freeze_embeddings": True}, {"freeze_embeddings": True, "freeze_layers": 3}, {"freeze_layers": -1},
         # Distillation over unlabelled train-map states: from the incumbent itself, and from the latest larger
         # teacher (runs/teachers/current, e.g. Bekko-68M trained on the same labels) when one exists.
         {"distill_from": "@incumbent", "distill_max": 1000},
