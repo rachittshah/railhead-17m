@@ -201,16 +201,31 @@ def _write_atomic(path: Path, obj: dict) -> None:
 CLAIM_TTL_S = 3600
 
 
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def claim(out_dir: Path, state_id: str) -> bool:
-    """Atomically claim a state so concurrent labellers never duplicate work. A claim older than
-    ``CLAIM_TTL_S`` belongs to a dead run and is taken over."""
+    """Atomically claim a state so concurrent labellers never duplicate work. A claim whose worker process is
+    gone (a stopped or crashed labeller) or that is older than ``CLAIM_TTL_S`` is taken over."""
     d = Path(out_dir) / ".claims"
     d.mkdir(exist_ok=True)
     path = d / state_id
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
-        if time.time() - path.stat().st_mtime < CLAIM_TTL_S:
+        try:
+            pid = int(path.read_text() or 0)
+            fresh = time.time() - path.stat().st_mtime < CLAIM_TTL_S
+        except (OSError, ValueError):
+            pid, fresh = 0, False
+        if fresh and pid and _alive(pid):
             return False
         path.unlink(missing_ok=True)
         return claim(out_dir, state_id)
