@@ -4,7 +4,7 @@
 # until data/labels/.stop exists. Every pass is a group in Trackio (project railhead-17m).
 set -u
 cd "${0:A:h}/.."
-R=.venv/bin/rh17m
+R=(taskpolicy -a .venv/bin/rh17m)  # app resource policy: P-cores (see src/rh17m/sched.py)
 GROWTH=${GROWTH:-1.25}
 MIN_VAL=${MIN_VAL:-40}
 last=$(cat runs/climb/last_n 2>/dev/null || echo 0)  # persisted, so a restart does not redo a pass

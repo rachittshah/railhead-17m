@@ -23,10 +23,12 @@ import random
 import tempfile
 import time
 import traceback
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+import railhead.server as rh_server
 from railhead.actions import to_gs
 from railhead.bridge import BridgeError
 from railhead.task import TaskSpec
@@ -155,8 +157,30 @@ def _rollout(save: Path, workdir: Path, seed: int, cfg: LabelConfig, chunks: int
         world.close()
 
 
+@contextmanager
+def fast_saves(fmt: str = "none"):
+    """Uncompressed savegames for the throwaway fork/option saves of one label job: 52 ms vs 1.2 s (LZMA) per
+    save of a 148-vehicle state under load, ~3.5 MB each in a temp dir, same future (checksum) as LZMA.
+    Harvested states in data/states keep the default format."""
+    misc = rh_server.BASE_SETTINGS.setdefault("misc", {})
+    old = misc.get("savegame_format")
+    misc["savegame_format"] = fmt
+    try:
+        yield
+    finally:
+        if old is None:
+            misc.pop("savegame_format", None)
+        else:
+            misc["savegame_format"] = old
+
+
 def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig()) -> dict:
     """Label one state (see the module docstring). Returns the record; does not write it."""
+    with fast_saves():
+        return _label_state(root, state_id, cfg)
+
+
+def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
     from rhs1.candidates import enumerate_routes
     from rhs1.snapshot import aggregate_routes, render_state, take_snapshot
 

@@ -4,12 +4,12 @@
 set -u
 cd "${0:A:h}/.."
 S=rh17m
-R=".venv/bin/rh17m"
+R="taskpolicy -a .venv/bin/rh17m"  # app resource policy: P-cores (see src/rh17m/sched.py)
 tmux has-session -t $S 2>/dev/null && { echo "session $S already running"; exit 1; }
 DEV=$(ls ~/railhead/tasks | grep -E '^arena-dev-02' | tr '\n' ' ')
 mkdir -p data/logs
 loop() { echo "cd $PWD && while true; do $1; [ -f data/labels/.stop ] && break; sleep 120; done"; }
-tmux new-session -d -s $S -n harvest "cd $PWD && $R states teacher >> data/logs/teacher.log 2>&1; \
+tmux new-session -d -s $S -n harvest "cd $PWD && [ -f data/states/.harvest-done ] && exit 0; $R states teacher >> data/logs/teacher.log 2>&1; \
   $R states hub-teacher >> data/logs/hub-teacher.log 2>&1; \
   $R states start --tasks $(ls ~/railhead/tasks | grep -E '^arena-(train|dev)-02' | tr '\n' ' ') >> data/logs/start.log 2>&1; \
   $R states selfplay --games 2 --workers 4 >> data/logs/selfplay.log 2>&1; \
