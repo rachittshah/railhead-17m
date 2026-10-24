@@ -92,18 +92,8 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   - [x] Pass 8 artifact: 'expansions:false' kept because its val had fewer options (lower regret by
         construction). Fix: all configs judged on the same decisions (options/values/targets from the base
         config; only text keys follow the candidate). Incumbent restored again to 1023-1627-base-s1.
-- PAUSED 2026-10-23 ~22:45 at the user's request (machine freed for gaming): every stage stopped with
-  scripts/stop.sh; data/labels/.stop set. Pass 9 was interrupted during its teacher retrain (nothing lost:
-  labels/states/obs on disk; incumbent = 1023-1627-base-s1).
-- Resume: rm data/labels/.stop; echo 0 > runs/climb/last_n; scripts/launch.sh (harvest step is a no-op,
-  labellers/climb/watch/dashboard restart; play/observe windows also relaunch, safe to kill if not wanted).
-- Next: if v4-only training wins offline AND in the gate, the label generation question is settled
-- Open: UNCONFIRMED flaky unit test (1 failure once under heavy load, not reproduced in 4 runs)
-- Next: train v1 → eval vs baselines → HF push → hillclimb loop (data, tau, features, lr, epochs, layouts)
-- Remaining:
-  - [ ] Closed-loop player (17M picks routes in full games) + paired eval on dev maps
-  - [ ] Policy iteration: 17M as self-play policy to generate on-policy states
-  - [ ] Extra questions (fleet_delta, next_wait) once route choice is solid
+- RESUMED 2026-10-24 08:38: climb pass 10 (1369 ex, 251 val) started with teacher retrain; labellers
+  train x11, val x8, test x3; watch + Trackio dashboard (:7860). Incumbent still 1023-1627-base-s1.
 
 ## Open questions
 - UNCONFIRMED: HF write token (user must run `hf auth login`).
