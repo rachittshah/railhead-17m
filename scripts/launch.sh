@@ -18,8 +18,6 @@ tmux new-session -d -s $S -n harvest "cd $PWD && $R states teacher >> data/logs/
 tmux new-window -d -t $S -n label-train "$(loop "$R label --workers ${TRAIN_WORKERS:-11} --splits train --order-seed 3 >> data/logs/label-train.log 2>&1")"
 tmux new-window -d -t $S -n label-val "$(loop "$R label --workers ${VAL_WORKERS:-8} --splits val --order-seed 2 >> data/logs/label-val.log 2>&1")"
 tmux new-window -d -t $S -n label-test "$(loop "$R label --workers ${TEST_WORKERS:-3} --splits test,ood --order-seed 4 >> data/logs/label-test.log 2>&1")"
-tmux new-window -d -t $S -n observe "cd $PWD && nice -n 5 $R observe --workers 3 >> data/logs/observe.log 2>&1"
-tmux new-window -d -t $S -n play-base "cd $PWD && nice -n 10 $R play --tasks $DEV --policies longest longest_affordable random hold --seeds 1 --wake-days 180 --workers 2 --out runs/play/baselines-w180 >> data/logs/play-baselines.log 2>&1"
 tmux new-window -d -t $S -n climb "cd $PWD && scripts/climb_loop.sh"
 tmux new-window -d -t $S -n watch "cd $PWD && $R watch --interval 120 >> data/logs/watch.log 2>&1"
 tmux new-window -d -t $S -n trackio "cd $PWD && .venv/bin/trackio show --project railhead-17m --no-footer >> data/logs/trackio.log 2>&1"
