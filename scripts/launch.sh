@@ -24,7 +24,7 @@ tmux new-window -d -t $S -n harvest "cd $PWD && [ -f data/states/.harvest-done ]
 tmux new-window -d -t $S -n label-train "$(loop "RH17M_STAGE=label-train $R label --workers ${TRAIN_WORKERS:-11} --splits train --order-seed 3 >> data/logs/label-train.log 2>&1")"
 tmux new-window -d -t $S -n label-val "$(loop "RH17M_STAGE=label-val $R label --workers ${VAL_WORKERS:-8} --splits val --order-seed 2 >> data/logs/label-val.log 2>&1")"
 tmux new-window -d -t $S -n label-test "$(loop "RH17M_STAGE=label-test $R label --workers ${TEST_WORKERS:-3} --splits test,ood --order-seed 4 >> data/logs/label-test.log 2>&1")"
-tmux new-window -d -t $S -n climb "cd $PWD && scripts/climb_loop.sh"
+[[ ${CLIMB:-1} == 1 ]] && tmux new-window -d -t $S -n climb "cd $PWD && scripts/climb_loop.sh"  # CLIMB=0: no GPU stage
 tmux new-window -d -t $S -n watch "cd $PWD && $R watch --interval 120 >> data/logs/watch.log 2>&1"
 tmux new-window -d -t $S -n trackio "cd $PWD && .venv/bin/trackio show --project railhead-17m --no-footer >> data/logs/trackio.log 2>&1"
 tmux list-windows -t $S
