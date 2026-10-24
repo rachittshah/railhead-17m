@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -242,6 +243,20 @@ def _gate(a: argparse.Namespace) -> int:
     return 0 if res["verdict"] == "accept" else 1
 
 
+def _trace(a: argparse.Namespace) -> int:
+    """``eval "$(rh17m trace begin)"`` exports a TRACEPARENT that every later rh17m command hangs under;
+    ``rh17m trace end NAME k=v ...`` then emits that parent span (scripts/climb_loop.sh, one per climb pass)."""
+    from rh17m import tracing
+
+    if a.action == "begin":
+        print(" ".join(f"export {k}={v};" for k, v in tracing.begin().items()))
+        return 0
+    attrs = dict(kv.split("=", 1) for kv in a.attrs)
+    tracing.end(a.name, os.environ.get("TRACEPARENT", ""), int(os.environ.get("RH17M_TRACE_START_NS", "0")),
+                **attrs)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(prog="rh17m")
@@ -345,12 +360,29 @@ def main(argv: list[str] | None = None) -> int:
     gt.add_argument("--root", default=str(Path(__file__).resolve().parents[2] / "runs" / "play-devhub"))
     gt.set_defaults(fn=_gate)
 
+    tc = sub.add_parser("trace", help="open/close a parent span around several commands (shell scripts)")
+    tc.add_argument("action", choices=["begin", "end"])
+    tc.add_argument("name", nargs="?", default="span")
+    tc.add_argument("attrs", nargs="*", default=[], help="key=value span attributes (end)")
+    tc.set_defaults(fn=_trace)
+
     b = sub.add_parser("bench", help="simulator throughput")
     b.add_argument("rest", nargs=argparse.REMAINDER)
     b.set_defaults(fn=lambda a: __import__("rh17m.bench", fromlist=["main"]).main(a.rest))
 
     a = p.parse_args(argv)
-    return a.fn(a)
+    if a.cmd == "trace":
+        return a.fn(a)
+    from rh17m import tracing
+
+    # The stage names this process's (and its pool workers') resource; TRACEPARENT nests the command under a
+    # caller's span (a climb pass in scripts/climb_loop.sh).
+    os.environ.setdefault("RH17M_STAGE", a.cmd)
+    with tracing.attach(os.environ.get("TRACEPARENT", "")), \
+            tracing.span(f"rh17m.{a.cmd}", argv=" ".join(sys.argv[1:] if argv is None else argv)) as sp:
+        rc = a.fn(a)
+        sp.set_attribute("exit_code", rc or 0)
+        return rc
 
 
 if __name__ == "__main__":

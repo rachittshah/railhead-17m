@@ -18,6 +18,9 @@ dependencies = [
     "pyarrow>=20",
     "datasets>=3",
     "trackio[apple-gpu]>=0.43",
+    # Tracing (src/rh17m/tracing.py); the Phoenix viewer is a separate `uv tool install arize-phoenix`.
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
 ]
 
 [project.optional-dependencies]

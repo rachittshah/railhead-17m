@@ -23,6 +23,7 @@ from railhead.rewards import tycoon_log
 from railhead.task import TaskSpec
 from railhead.world import World
 
+from rh17m import tracing
 from rh17m.dataset import HOLD, DatasetConfig, observation
 from rh17m.expand import apply_option, expansion_candidates
 from rh17m.labels import LabelConfig, candidate_extras, querier_for
@@ -86,7 +87,8 @@ def play(task_id: str, policy: Policy, seed: int, wake_days: int = 90, max_air: 
                 obs, cands, exps = wakeup_observation(world, task, end_date, max_air, dcfg)
                 obs = wakeup_options(obs, blocked)
                 t1 = time.perf_counter()
-                probs = policy(obs)
+                with tracing.span("play.policy", options=len(obs["options"])):
+                    probs = policy(obs)
                 policy_s += time.perf_counter() - t1
                 order = sorted(probs, key=lambda k: (-probs[k], k != HOLD, rng.random()))
                 rec = {"date": world.state()["ymd"], "pick": order[0], "p": round(probs[order[0]], 4),
@@ -94,7 +96,9 @@ def play(task_id: str, policy: Policy, seed: int, wake_days: int = 90, max_air: 
                 for key in order[:max_tries]:
                     if key == HOLD:
                         break
-                    r = apply_option(world, key, cands, exps)
+                    with tracing.span("play.build", option=key) as sp:
+                        r = apply_option(world, key, cands, exps)
+                        sp.set_attributes({"kind": r["kind"], "ok": r["ok"], "cost": r["cost"] or 0})
                     rec["tries"].append({"key": key, "kind": r["kind"], "ok": r["ok"], "cost": r["cost"],
                                          "ladder": r.get("ladder"), "planes": r.get("planes"),
                                          "failed": r["failed_step"]})
@@ -124,12 +128,19 @@ def play(task_id: str, policy: Policy, seed: int, wake_days: int = 90, max_air: 
 
 
 def _job(args: tuple) -> dict:
-    task_id, policy_name, seed, wake_days, out_dir, model_dir = args
+    task_id, policy_name, seed, wake_days, out_dir, model_dir, *rest = args  # rest: the caller's traceparent
     dest = Path(out_dir) / f"{policy_name}.{task_id}.s{seed}.json"
     if dest.exists():
         return json.loads(dest.read_text())
-    policy = make_policy(policy_name, model_dir)
-    res = {"policy": policy_name, **play(task_id, policy, seed, wake_days)}
+    try:
+        with tracing.attach(rest[0] if rest else ""), tracing.span(
+                "play.game", task=task_id, policy=policy_name, seed=seed, wake_days=wake_days,
+                model=model_dir or "") as sp:
+            policy = make_policy(policy_name, model_dir)
+            res = {"policy": policy_name, **play(task_id, policy, seed, wake_days)}
+            sp.set_attributes({k: res[k] for k in ("final_nw", "score", "builds", "built_ok", "policy_s")})
+    finally:
+        tracing.flush()
     tmp = dest.with_name(f".{dest.name}.tmp")
     tmp.write_text(json.dumps(res))
     tmp.rename(dest)
@@ -162,7 +173,8 @@ def tournament(task_ids: list[str], policies: list[str], seeds: list[int], out_d
     import multiprocessing as mp
 
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    jobs = [(t, p, s, wake_days, str(out_dir), model_dir) for s in seeds for t in task_ids for p in policies]
+    tp = tracing.traceparent()
+    jobs = [(t, p, s, wake_days, str(out_dir), model_dir, tp) for s in seeds for t in task_ids for p in policies]
     with mp.get_context("spawn").Pool(workers) as pool:
         yield from pool.imap_unordered(_job, jobs)
 

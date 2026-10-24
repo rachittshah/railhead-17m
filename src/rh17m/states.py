@@ -224,12 +224,19 @@ def model_dcfg(model):
 
 
 def _selfplay_job(args: tuple) -> dict:
-    task_id, root, seed, policy, max_states, epsilon = args
+    from rh17m import tracing
+
+    task_id, root, seed, policy, max_states, epsilon, *rest = args  # rest: the caller's traceparent
     try:
-        got = selfplay(task_id, Path(root), seed, policy=policy, max_states=max_states, epsilon=epsilon)
+        with tracing.attach(rest[0] if rest else ""), tracing.span(
+                "states.selfplay", task=task_id, seed=seed, policy=policy) as sp:
+            got = selfplay(task_id, Path(root), seed, policy=policy, max_states=max_states, epsilon=epsilon)
+            sp.set_attribute("states", len(got))
         return {"task": task_id, "seed": seed, "policy": policy, "states": len(got)}
     except Exception as e:  # noqa: BLE001 - a crashed game loses its own states only
         return {"task": task_id, "seed": seed, "policy": policy, "error": repr(e)}
+    finally:
+        tracing.flush()
 
 
 def selfplay_many(task_ids: list[str], root: Path, seeds: list[int], policies: list[str],
@@ -237,7 +244,10 @@ def selfplay_many(task_ids: list[str], root: Path, seeds: list[int], policies: l
     """Every (task, seed, policy) game, ``workers`` at a time; yields one summary per finished game."""
     import multiprocessing as mp
 
-    jobs = [(t, str(root), s, p, max_states, epsilon) for s in seeds for p in policies for t in task_ids]
+    from rh17m import tracing
+
+    tp = tracing.traceparent()
+    jobs = [(t, str(root), s, p, max_states, epsilon, tp) for s in seeds for p in policies for t in task_ids]
     with mp.get_context("spawn").Pool(workers) as pool:
         yield from pool.imap_unordered(_selfplay_job, jobs)
 

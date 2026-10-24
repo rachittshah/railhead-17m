@@ -1,7 +1,8 @@
 #!/usr/bin/env zsh
 # Keep hillclimbing as labels arrive: whenever the usable examples grow by GROWTH (default 25%) over the last
 # climb, run a climb pass from the incumbent, then publish the incumbent (Hub, if logged in) and push. Runs
-# until data/labels/.stop exists. Every pass is a group in Trackio (project railhead-17m).
+# until data/labels/.stop exists. Every pass is a group in Trackio (project railhead-17m) and one trace
+# (climb_pass, every rh17m command of the pass nested under it via TRACEPARENT) in the Phoenix viewer.
 set -u
 cd "${0:A:h}/.."
 R=(taskpolicy -a .venv/bin/rh17m)  # app resource policy: P-cores (see src/rh17m/sched.py)
@@ -18,6 +19,7 @@ while [[ ! -f data/labels/.stop ]]; do
   read n val <<< "$(count)"
   if (( val >= MIN_VAL )) && (( n >= last * GROWTH )); then
     echo "$(date +%H:%M) climb pass on $n examples ($val val)" | tee -a data/logs/climb_loop.log
+    eval "$(.venv/bin/rh17m trace begin)"
     # A fresh Bekko-68M teacher on the current labels (default settings), for the @teacher moves.
     tname="teacher-68m-$(date +%m%d-%H%M)"
     $R train --name "$tname" --set init='"bekko-68m"' group='"teachers"' >> data/logs/teacher68m.log 2>&1 \
@@ -50,6 +52,8 @@ while [[ ! -f data/labels/.stop ]]; do
       nice -n 5 $R states selfplay --tasks train --policy model --model "$inc" --games 1 --max-states 12 \
         --workers 3 --seed0 $(( $(date +%s) % 100000 )) >> data/logs/dagger.log 2>&1
     fi
+    .venv/bin/rh17m trace end climb_pass examples=$n val=$val incumbent="${inc:h:t}"
+    unset TRACEPARENT RH17M_TRACE_START_NS
     last=$n
     echo $n > runs/climb/last_n
   fi

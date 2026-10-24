@@ -34,6 +34,7 @@ from railhead.bridge import BridgeError
 from railhead.task import TaskSpec
 from railhead.world import World
 
+from rh17m import tracing
 from rh17m.expand import as_dicts, expand_affordable, expansion_candidates
 from rh17m.states import find_task, list_states, load_meta
 
@@ -136,7 +137,13 @@ def continue_expand(world: World) -> bool:
         return False
 
 
-def _rollout(save: Path, workdir: Path, seed: int, cfg: LabelConfig, chunks: int | None = None) -> dict:
+def _rollout(save: Path, workdir: Path, seed: int, cfg: LabelConfig, chunks: int | None = None,
+             key: str = "") -> dict:
+    with tracing.span("label.rollout", option=key, seed=seed, chunks=cfg.chunks if chunks is None else chunks):
+        return _rollout_traced(save, workdir, seed, cfg, chunks)
+
+
+def _rollout_traced(save: Path, workdir: Path, seed: int, cfg: LabelConfig, chunks: int | None) -> dict:
     world = World.load(workdir, save)
     try:
         out = world.admin.rcon(f"reseed {seed & 0xFFFFFFFF}")
@@ -151,7 +158,10 @@ def _rollout(save: Path, workdir: Path, seed: int, cfg: LabelConfig, chunks: int
             nw.append(a)
             money.append(b)
             if cfg.continuation == "expand" and (i + 1) % every == 0 and i + 1 < n:
-                added += continue_expand(world)
+                with tracing.span("label.continue_expand", chunk=i) as sp:
+                    ok = continue_expand(world)
+                    sp.set_attribute("added", ok)
+                added += ok
         return {"nw": nw, "money": money, "continued": added}
     finally:
         world.close()
@@ -189,53 +199,66 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
     t0 = time.perf_counter()
     from rh17m.dataset import map_split
 
-    seeds = rollout_seeds(state_id, cfg.train_seeds if map_split(meta.task_id) == "train" else cfg.seeds)
+    split = map_split(meta.task_id)
+    seeds = rollout_seeds(state_id, cfg.train_seeds if split == "train" else cfg.seeds)
+    tracing.annotate(split=split, seeds=len(seeds), task=meta.task_id, source=meta.source)
     with tempfile.TemporaryDirectory(prefix="rh17m-label-") as tmp:
         tmp = Path(tmp)
         parent = World.load(tmp / "parent", Path(root) / f"{state_id}.sav")
         try:
-            snap = take_snapshot(querier_for(parent, task, meta.end_date))
-            routes = aggregate_routes(snap)
-            labels = {c["id"]: c["label"] for c in parent.call("cargos")}
-            cands = [c for c in enumerate_routes(snap, routes, max_per_mode=cfg.max_air, cargo_labels=labels)
-                     if c.mode == "air"][: cfg.max_air]
-            rendered = render_state(snap, routes, cands)
-            extras = candidate_extras(snap, cands, labels)
-            nw0, money0 = _net_worth(parent)
+            with tracing.span("label.snapshot") as sp:
+                snap = take_snapshot(querier_for(parent, task, meta.end_date))
+                routes = aggregate_routes(snap)
+                labels = {c["id"]: c["label"] for c in parent.call("cargos")}
+                cands = [c for c in enumerate_routes(snap, routes, max_per_mode=cfg.max_air, cargo_labels=labels)
+                         if c.mode == "air"][: cfg.max_air]
+                rendered = render_state(snap, routes, cands)
+                extras = candidate_extras(snap, cands, labels)
+                nw0, money0 = _net_worth(parent)
+                sp.set_attributes({"candidates": len(cands), "nw0": nw0})
             saves: dict[str, Path] = {HOLD: parent.save(tmp / "opt-hold.sav")}
             builds: dict[str, dict] = {HOLD: {"ok": True, "cost": 0, "failed_step": None}}
             aliases: set[str] = set()  # failed before spending anything: the world is the hold world
             for i, c in enumerate(cands):
-                child = parent.fork(tmp / f"build{i}")
-                try:
+                with tracing.span("label.build", option=c.candidate_id, kind="route") as sp:
+                    child = parent.fork(tmp / f"build{i}")
                     try:
-                        br, used = build_affordable(child, c.a["id"], c.b["id"])
-                        builds[c.candidate_id] = {"ok": br.ok, "cost": br.cost, "failed_step": br.failed_step,
-                                                  "airport_type": br.airport_type, "planes": used[1],
-                                                  "ladder": list(used)}
-                        untouched = not br.ok and not br.cost and not br.steps
-                    except BridgeError as e:
-                        builds[c.candidate_id] = {"ok": False, "cost": None, "failed_step": f"raise:{e.code}"}
-                        untouched = False
-                    if untouched:
-                        aliases.add(c.candidate_id)
-                    else:
-                        saves[c.candidate_id] = child.save(tmp / f"opt-{i}.sav")
-                finally:
-                    child.close()
+                        try:
+                            with tracing.span("label.build_affordable"):
+                                br, used = build_affordable(child, c.a["id"], c.b["id"])
+                            builds[c.candidate_id] = {"ok": br.ok, "cost": br.cost, "failed_step": br.failed_step,
+                                                      "airport_type": br.airport_type, "planes": used[1],
+                                                      "ladder": list(used)}
+                            untouched = not br.ok and not br.cost and not br.steps
+                        except BridgeError as e:
+                            builds[c.candidate_id] = {"ok": False, "cost": None, "failed_step": f"raise:{e.code}"}
+                            untouched = False
+                        b = builds[c.candidate_id]
+                        sp.set_attributes({"ok": b["ok"], "cost": b["cost"] or 0, "failed_step": b["failed_step"] or "",
+                                           "alias": untouched})
+                        if untouched:
+                            aliases.add(c.candidate_id)
+                        else:
+                            saves[c.candidate_id] = child.save(tmp / f"opt-{i}.sav")
+                    finally:
+                        child.close()
             exps = expansion_candidates(snap, routes, parent.call("depots"), cfg.max_expand) if cfg.max_expand else []
             for i, e in enumerate(exps):
-                child = parent.fork(tmp / f"expand{i}")
-                try:
-                    r = expand_affordable(child, e)
-                    builds[e.key] = {"ok": r["ok"], "cost": r["cost"], "failed_step": r["failed_step"],
-                                     "planes": r["planes"], "kind": "expand"}
-                    if not r["planes"] and not r["cost"]:
-                        aliases.add(e.key)
-                    else:
-                        saves[e.key] = child.save(tmp / f"opt-x{i}.sav")
-                finally:
-                    child.close()
+                with tracing.span("label.build", option=e.key, kind="expand") as sp:
+                    child = parent.fork(tmp / f"expand{i}")
+                    try:
+                        with tracing.span("label.expand_affordable"):
+                            r = expand_affordable(child, e)
+                        builds[e.key] = {"ok": r["ok"], "cost": r["cost"], "failed_step": r["failed_step"],
+                                         "planes": r["planes"], "kind": "expand"}
+                        sp.set_attributes({"ok": r["ok"], "cost": r["cost"] or 0, "planes": r["planes"] or 0,
+                                           "alias": not r["planes"] and not r["cost"]})
+                        if not r["planes"] and not r["cost"]:
+                            aliases.add(e.key)
+                        else:
+                            saves[e.key] = child.save(tmp / f"opt-x{i}.sav")
+                    finally:
+                        child.close()
         finally:
             parent.close()
         t_build = time.perf_counter() - t0
@@ -250,10 +273,11 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
         # No need to simulate past the end of the game (horizon + run-off year), where the arena scores.
         left = meta.end_date + 365 - meta.date
         chunks = max(1, min(cfg.chunks, -(-left // cfg.chunk_days)))
+        tracing.annotate(options=len(options), simulated=len(saves), aliases=len(aliases), chunks=chunks)
         outcomes: dict[str, Any] = {}
         for key, save in saves.items():
             outcomes[key] = {**builds[key], "rollouts": [
-                _rollout(save, tmp / f"roll-{key}-{m}", s, cfg, chunks) for m, s in enumerate(seeds)]}
+                _rollout(save, tmp / f"roll-{key}-{m}", s, cfg, chunks, key=key) for m, s in enumerate(seeds)]}
         for key in aliases:  # same world and same seeds as hold: the rollouts would repeat hold's exactly
             outcomes[key] = {**builds[key], "alias": HOLD, "rollouts": outcomes[HOLD]["rollouts"]}
     return {
@@ -309,19 +333,28 @@ def claim(out_dir: Path, state_id: str) -> bool:
 
 
 def _job(args: tuple) -> dict:
-    root, state_id, out_dir, cfg_d = args
+    root, state_id, out_dir, cfg_d, *rest = args  # rest: the labeller run's traceparent
     cfg = LabelConfig(**cfg_d)
     dest = Path(out_dir) / f"{state_id}.json"
     if dest.exists() or not claim(Path(out_dir), state_id):
         return {"state_id": state_id, "skipped": True}
     try:
-        rec = label_state(Path(root), state_id, cfg)
-        _write_atomic(dest, rec)
-        return {"state_id": state_id, "ok": True, "s": rec["timing"]["total_s"], "options": len(rec["options"])}
-    except Exception as e:  # noqa: BLE001 - one bad state must not stop the run; the error file lets a rerun retry it
-        _write_atomic(Path(out_dir) / f"{state_id}.error.json",
-                      {"state_id": state_id, "error": repr(e), "trace": traceback.format_exc()[-4000:]})
-        return {"state_id": state_id, "ok": False, "error": repr(e)}
+        with tracing.attach(rest[0] if rest else ""), tracing.span("label.job", state_id=state_id) as sp:
+            try:
+                rec = label_state(Path(root), state_id, cfg)
+                _write_atomic(dest, rec)
+                sp.set_attributes({"ok": True, "options": len(rec["options"]),
+                                   "uninformative": rec.get("uninformative", "")})
+                return {"state_id": state_id, "ok": True, "s": rec["timing"]["total_s"],
+                        "options": len(rec["options"])}
+            except Exception as e:  # noqa: BLE001 - one bad state must not stop the run; the error file lets a rerun retry it
+                sp.record_exception(e)
+                sp.set_attributes({"ok": False, "error": repr(e)[:500]})
+                _write_atomic(Path(out_dir) / f"{state_id}.error.json",
+                              {"state_id": state_id, "error": repr(e), "trace": traceback.format_exc()[-4000:]})
+                return {"state_id": state_id, "ok": False, "error": repr(e)}
+    finally:
+        tracing.flush()
 
 
 def label_all(root: Path, out_dir: Path, workers: int = 8, cfg: LabelConfig = LabelConfig(),
@@ -337,7 +370,9 @@ def label_all(root: Path, out_dir: Path, workers: int = 8, cfg: LabelConfig = La
     progress = out_dir / "_progress.log"
     done = failed = 0
     t0 = time.perf_counter()
-    jobs = [(str(root), s, str(out_dir), asdict(cfg)) for s in todo]
+    tracing.annotate(todo=len(todo), workers=workers)
+    tp = tracing.traceparent()
+    jobs = [(str(root), s, str(out_dir), asdict(cfg), tp) for s in todo]
     with mp.get_context("spawn").Pool(workers) as pool:
         for r in pool.imap_unordered(_job, jobs):
             done += bool(r.get("ok"))

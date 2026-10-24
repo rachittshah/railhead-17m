@@ -20,6 +20,7 @@ import mlx.core as mx
 import numpy as np
 
 from rh17m import bekko_mlx as B
+from rh17m import tracing
 from rh17m.dataset import DatasetConfig, load_examples
 from rh17m.evaluate import BASELINES, metrics, per_example
 
@@ -176,7 +177,14 @@ def clear_mlx_cache() -> None:
 def run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
     limit_mlx_cache()
     try:
-        return _run(cfg, labels_dir, out_dir)
+        with tracing.span("train.run", name=cfg.name, init=cfg.init, seed=cfg.seed, epochs=cfg.epochs, lr=cfg.lr,
+                          batch_size=cfg.batch_size, group=cfg.group, data=cfg.data,
+                          distill=cfg.distill_ref or cfg.distill_from) as sp:
+            res = _run(cfg, labels_dir, out_dir)
+            sp.set_attributes({"best_epoch": res["best_epoch"], "train_s": res["train_s"],
+                               "train_used": res["train_used"], "temperature": res["temperature"],
+                               **{f"val.{k}": v for k, v in res.get("val", {}).items()}})
+            return res
     finally:
         clear_mlx_cache()
 
@@ -185,6 +193,7 @@ def _run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "config.json").write_text(json.dumps(asdict(cfg), indent=1))
+    t_load = time.perf_counter()
     dcfg = DatasetConfig(**cfg.data)
     exs = load_examples(Path(labels_dir), dcfg)
     splits = {s: [e for e in exs if e["split"] == s] for s in ("train", "val", "test", "ood")}
@@ -234,7 +243,9 @@ def _run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
                                                                               "n_distill": n_distill})
     gstep = 0
     t0 = time.perf_counter()
+    tracing.annotate(load_s=round(time.perf_counter() - t_load, 2), n_train=len(train), n_val=len(splits["val"]))
     for epoch in range(cfg.epochs):
+        ep_span = tracing.start("train.epoch", epoch=epoch)
         model.set_compute_dtype(train_dtype)
         order = list(range(len(train)))
         rng.shuffle(order)
@@ -267,6 +278,8 @@ def _run(cfg: TrainConfig, labels_dir: Path, out_dir: Path) -> dict:
                 best_params = {k: mx.array(v) for k, v in B.state_dict(model).items()}
         hist.write(json.dumps(row) + "\n")
         hist.flush()
+        ep_span.set_attributes(row)
+        ep_span.end()
         tracker.log({"train/epoch_loss": row["loss"],
                      **{f"val/{k[4:]}": v for k, v in row.items() if k.startswith("val_")}}, gstep)
         if cfg.patience and val and epoch - best["epoch"] >= cfg.patience:

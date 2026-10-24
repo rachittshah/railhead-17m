@@ -22,6 +22,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+from rh17m import tracing
 from rh17m.dataset import DatasetConfig, load_examples
 from rh17m.evaluate import bootstrap_diff, metrics, per_example
 from rh17m.train import TrainConfig, clear_mlx_cache, limit_mlx_cache, predict, run
@@ -138,12 +139,13 @@ def _val_scores(model_dir: Path, val: list[dict]) -> tuple[list[float], dict]:
 
     todo = [e for e in val if (str(model_dir), _key(e)) not in _PRED_CACHE]
     if todo:
-        model = B.load(str(model_dir), revision=None)
-        t = json.loads((model_dir / "rh17m.json").read_text())["temperature"]
-        for e, p in zip(todo, predict(model, todo, t), strict=True):
-            _PRED_CACHE[(str(model_dir), _key(e))] = p
-        del model
-        clear_mlx_cache()
+        with tracing.span("climb.predict", model=str(model_dir), todo=len(todo), cached=len(val) - len(todo)):
+            model = B.load(str(model_dir), revision=None)
+            t = json.loads((model_dir / "rh17m.json").read_text())["temperature"]
+            for e, p in zip(todo, predict(model, todo, t), strict=True):
+                _PRED_CACHE[(str(model_dir), _key(e))] = p
+            del model
+            clear_mlx_cache()
     probs = [_PRED_CACHE[(str(model_dir), _key(e))] for e in val]
     return per_example(val, probs, METRIC), metrics(val, probs)
 
@@ -234,6 +236,7 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
         return sorted((e for e in load_examples(labels_dir, DatasetConfig(**data)) if e["split"] == "val"),
                       key=lambda e: e["id"])
 
+    @tracing.traced("climb.evaluate")
     def score(dirs: list[Path], val: list[dict]) -> tuple[list[float], dict, list[float]]:
         per_seed, mets = [], []
         for d in dirs:
@@ -256,9 +259,11 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
                                    [Path(d) for d in prev.get("seed_dirs", [])])
         if resolved:
             inc_cfg.distill_from = resolved
-    inc_dirs = train_seeds(inc_cfg, f"{stamp}-base")
-    val0 = val_for(inc_cfg)
-    _, inc_m, by_seed = score(inc_dirs, val0)
+    with tracing.span("climb.base", run=f"{stamp}-base", seeds=list(seeds)) as sp:
+        inc_dirs = train_seeds(inc_cfg, f"{stamp}-base")
+        val0 = val_for(inc_cfg)
+        _, inc_m, by_seed = score(inc_dirs, val0)
+        sp.set_attributes({f"val.{k}": v for k, v in inc_m.items()})
     # Std of a difference of two k-seed means ~ seed std * sqrt(2/k), with the seed std estimated from the
     # incumbent's k seeds (sample std; the range/1.128 shortcut is only right for k=2).
     seed_sd = statistics.stdev(by_seed) if len(by_seed) > 1 else 0.0
@@ -282,17 +287,22 @@ def climb(base: TrainConfig, labels_dir: Path, seeds: tuple[int, ...] = (0, 1), 
             if cfg is None:  # e.g. no teacher trained yet
                 log({"run": name, "kind": phase, "move": move, "skipped": "unresolved"})
                 continue
-            cand_dirs = train_seeds(cfg, name)
-            runs += len(seeds)
-            # Both configs are scored on the val examples they share (min_spread may drop some).
-            cand_val, inc_val = val_for(cfg), val_for(inc_cfg)
-            ids = {e["id"] for e in cand_val} & {e["id"] for e in inc_val}
-            cand_val = [e for e in cand_val if e["id"] in ids]
-            inc_val = [e for e in inc_val if e["id"] in ids]
-            a, ma, _ = score(cand_dirs, cand_val)
-            b, mb, _ = score(inc_dirs, inc_val)
+            mspan = tracing.start("climb.move", run=name, phase=phase, move=move)
+            with tracing.current(mspan):
+                cand_dirs = train_seeds(cfg, name)
+                runs += len(seeds)
+                # Both configs are scored on the val examples they share (min_spread may drop some).
+                cand_val, inc_val = val_for(cfg), val_for(inc_cfg)
+                ids = {e["id"] for e in cand_val} & {e["id"] for e in inc_val}
+                cand_val = [e for e in cand_val if e["id"] in ids]
+                inc_val = [e for e in inc_val if e["id"] in ids]
+                a, ma, _ = score(cand_dirs, cand_val)
+                b, mb, _ = score(inc_dirs, inc_val)
             diff, lo, hi = bootstrap_diff(a, b)
             keep = diff < -noise and hi < 0 and "_control" not in move
+            mspan.set_attributes({"candidate": ma[METRIC], "incumbent": mb[METRIC], "diff": diff, "ci_low": lo,
+                                  "ci_high": hi, "noise": noise, "kept": keep, "n_val": len(ids)})
+            mspan.end()
             if "_control" in move:
                 # The A/A control measures the run-to-run variation the seed spread misses (training is not
                 # bit-deterministic, and labels keep arriving between runs): from here on a move must beat it.
