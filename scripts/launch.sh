@@ -4,26 +4,10 @@
 set -u
 cd "${0:A:h}/.."
 S=rh17m
-# Opt-in variants, applied to every stage through its command prefix (no shared tmux environment needed):
-#   RHS1_SRC=~/railhead-system1-batch/src  rhs1 source with the pipelined site search (until its PR merges)
-#   ENGINE=m4lto                           data/engines/<name>/build/openttd (scripts/build_engine_variant.sh)
-#   POOL=1                                 label stages reuse OpenTTD servers (src/rh17m/pool.py, RH17M_POOL=1)
-PRE=""
-POOLPRE=""
-[[ ${POOL:-0} == 1 ]] && POOLPRE="RH17M_POOL=1 "
-[[ -n ${RHS1_SRC:-} ]] && PRE+="PYTHONPATH=${RHS1_SRC:A} "
-if [[ -n ${ENGINE:-} ]]; then
-  [[ -x $PWD/data/engines/$ENGINE/build/openttd ]] || { echo "no engine variant $ENGINE"; exit 1; }
-  PRE+="RAILHEAD_OPENTTD=$PWD/data/engines/$ENGINE/build/openttd "
-fi
-R="${PRE}taskpolicy -a .venv/bin/rh17m"  # app resource policy: P-cores (see src/rh17m/sched.py)
+source "${0:A:h}/stack_env.sh"  # RHS1_SRC / ENGINE / POOL opt-ins -> PRE, POOLPRE, R
 tmux has-session -t $S 2>/dev/null && { echo "session $S already running"; exit 1; }
 DEV=$(ls ~/railhead/tasks | grep -E '^arena-dev-02' | tr '\n' ' ')
 mkdir -p data/logs data/phoenix
-# say which rhs1 and engine the stages will use: a silent fallback to the sequential builder measures nothing
-echo "rhs1:   $(env ${=PRE} .venv/bin/python -c "import rhs1.builders.air as a; print(a.__file__, 'pipelined' if hasattr(a, '_dry_runs') else 'sequential')")"
-echo "engine: ${ENGINE:-stock}"
-echo "pool:   ${POOL:-0}"
 loop() { echo "cd $PWD && while true; do $1; [ -f data/labels/.stop ] && break; sleep 120; done"; }
 # Trace viewer first (Arize Phoenix, `uv tool install arize-phoenix`): every stage exports OTLP spans to it
 # (src/rh17m/tracing.py); open http://127.0.0.1:6006 for the waterfalls. Stages started before it answers
