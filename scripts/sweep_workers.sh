@@ -10,6 +10,9 @@
 set -u
 cd "${0:A:h}/.."
 source "${0:A:h}/stack_env.sh"
+# A sleeping Mac freezes every timer here (a closed lid stalled a sweep for hours): hold the machine awake
+# (-i idle, -m disk, -s system sleep on AC) for as long as this script runs.
+caffeinate -ims -w $$ &
 NAME=${1:?usage: sweep_workers.sh <name> <workers> [<workers> ...]}
 shift
 WARM=${WARM:-3}
