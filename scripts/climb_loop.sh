@@ -36,7 +36,7 @@ while [[ ! -f data/labels/.stop ]]; do
     if [[ -n "$inc" && -n "$prev" && "$inc" != "$prev" ]]; then
       # Closed-loop gate: offline val gains have not always carried to play (an ensemble-distilled model was
       # better on val and significantly worse on the devhub maps), so a new incumbent must not lose in play.
-      if nice -n 5 $R gate --candidate "$inc" --reference "$prev" >> data/logs/climb_loop.log 2>&1; then
+      if nice -n 5 $R gate --candidate "$inc" --reference "$prev" --workers ${GATE_WORKERS:-8} >> data/logs/climb_loop.log 2>&1; then
         echo "$(date +%H:%M) gate accepted ${inc:h:t} over ${prev:h:t}" >> data/logs/climb_loop.log
       else
         echo "$(date +%H:%M) gate rejected ${inc:h:t}; restoring ${prev:h:t}" >> data/logs/climb_loop.log
@@ -50,7 +50,7 @@ while [[ ! -f data/labels/.stop ]]; do
       # DAgger: the incumbent plays every train map once (epsilon-greedy); the train labeller takes these first.
       echo "$(date +%H:%M) dagger self-play with ${inc:h:t}" >> data/logs/climb_loop.log
       nice -n 5 $R states selfplay --tasks train --policy model --model "$inc" --games 1 --max-states 12 \
-        --workers 3 --seed0 $(( $(date +%s) % 100000 )) >> data/logs/dagger.log 2>&1
+        --workers ${DAGGER_WORKERS:-6} --seed0 $(( $(date +%s) % 100000 )) >> data/logs/dagger.log 2>&1
     fi
     .venv/bin/rh17m trace end climb_pass examples=$n val=$val incumbent="${inc:h:t}"
     unset TRACEPARENT RH17M_TRACE_START_NS
