@@ -177,6 +177,13 @@ def bridge_totals() -> tuple[int, float]:
     return calls, seconds
 
 
+def record_calls(n: int, seconds: float) -> None:
+    """Count ``n`` round trips that took ``seconds`` in total (a pipelined batch, see pipeline.py)."""
+    acc = _running()
+    acc[0] += n
+    acc[1] += seconds
+
+
 def bridge_since(before: tuple[int, float]) -> tuple[int, float]:
     """Round trips and milliseconds made since ``before`` (a ``bridge_totals`` reading)."""
     calls, seconds = bridge_totals()

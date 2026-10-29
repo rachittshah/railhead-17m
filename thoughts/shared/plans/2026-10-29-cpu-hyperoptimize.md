@@ -118,7 +118,7 @@ ends with a contended 25-min window via `rh17m bench labels` and a one-line verd
 
 ---
 
-## Phase 0: Instrumentation and gates
+## Phase 0: Instrumentation and gates  [DONE, dfc9a1b]
 
 ### Overview
 The numbers that decide the rest: calls per build, a determinism gate for engine variants, and the window
@@ -163,6 +163,13 @@ median `bridge_calls` per build from Phoenix.
 - [ ] Baseline row recorded in the Results table
 
 **Decision point:** median `bridge_calls` per build >= 300 -> do Phase 2 before Phase 3.
+
+**Result (measured, one real label job, arena-train-0204 w000, uncontended):** `label.build_affordable` =
+**1,269 bridge calls per option** (min = median = max over 8 route options), 1.0-3.4 ms per call
+(1.3-4.3 s per option). Whole build phase: 10,173 calls, 18.9 s of 26.8 s (70%). `label.snapshot`: 16
+calls. `play.build` (gate games): 1,269 on a first-rung success, 2,404-5,034 when the airport ladder
+descends. Cause: `candidate_sites` dry-runs ALL 625 anchors per town (radius 12) with no early stop, 2 towns
+per route. -> Phase 2 first.
 
 ---
 
@@ -210,47 +217,51 @@ gate on the Hub maps too (then it is simply the same simulator, faster).
 
 ---
 
-## Phase 2: Build-phase latency (the contention lever)
+## Phase 2: Build-phase latency (the contention lever)  [REDESIGNED: pipelining, no GameScript change]
 
 ### Overview
-Build went 25 s -> 60 s per state under load while rollouts did not slow: it is latency-bound. The
-builder's site search makes up to 625 `air.airport dry_run` round trips per airport plus a `catchment`
-per usable site. Collapsing the search into one GameScript call makes the build phase immune to
-contention. Do this phase first if Phase 0 counts >= 300 calls per build.
+Build went 25 s -> 60 s per state under load while rollouts did not slow: it is latency-bound (Phase 0:
+10,173 round trips per state). The first design (a GS-side batched `air.sites`) is replaced: the GameScript's
+`HandleEvents` loops `while (GSEventController.IsEventWaiting())`, so it already drains every request that
+is waiting at its next tick. Sending the 625 dry-runs back to back therefore costs a few frames, with **no
+GameScript or Railhead change**. Also: the plan's "stops at `want` usable sites" was wrong, the Python loop
+has no stop condition, so the batch is trivially equivalent (all affordable anchors, same order).
 
 ### Changes Required
 
-#### 1. GS-side batched site search
-**Files**: Railhead PR (`~/railhead/gamescript/...` RailheadBridge): new method
-`air.sites(town, type, radius, want, join_station)` that walks the same anchor order as
-`candidate_sites` (Manhattan in half tiles, ties by tile index), dry-runs each, stops at `want` usable
-sites, and returns `[tile, cost]` rows. Optionally `air.catchment_many(tiles, w, h, radius)`.
-**rhs1 PR** (`src/rhs1/builders/air.py`): `candidate_sites` uses `air.sites` when `hello` advertises it,
-else the per-tile loop. The ordering and stop condition must be identical to the Python loop.
+#### 1. `World.call_many` (rh17m only)
+**File**: `src/rh17m/pipeline.py` (installed on package import like `sched.py`; `RH17M_PIPELINE=0` turns it
+off): sends requests with a sliding window of 256, matches replies by id (partial `p` pages, `r` finals,
+stale ids ignored, events kept), returns one value per call with refusals as `BridgeError` values. Each
+request still counts as a bridge call (`tracing.record_calls`), so spans show what a batch replaced.
 
-#### 2. Equivalence test
-**File**: `tests/integration/test_site_search_equivalence.py` (rhs1 or rh17m): on >= 20 states from
-`data/states`, run `build_air_route(dry_run=True)` with the batched path and the per-tile path; assert
-identical chosen tiles, costs and `BuildResult`. This is mandatory: the earlier Python-side site cache
-"broke builder internals" and was reverted.
+#### 2. rhs1 PR (branch `perf/pipelined-site-search`, worktree `~/railhead-system1-batch`)
+**File**: `src/rhs1/builders/air.py`: `candidate_sites` asks the first anchor alone (an unavailable airport
+type is refused on every anchor: still one call), then pipelines the rest when the querier has `.batch`;
+`build_air_route`'s `query` gets `.batch` when the world has `call_many`, recording the same quotes.
+Without `call_many` the old one-call-at-a-time path runs unchanged. Tests: pipelined == sequential sites,
+one probe call for an unavailable type, first non-site error wins, and `build_air_route` returns an
+identical `BuildResult` and mutations with and without pipelining (5 scenarios).
 
 #### 3. Secondary knobs (measure, keep if >= 5%)
-- Paused frame interval as a console setting (`pausedframe <ms>`, extends patch 0002): test 0.25-0.5 ms
-  for build servers (lower call latency) vs idle cost of parent servers spinning faster.
-- Latency tier for build-phase servers: `taskpolicy -a -l 0` on fork/build servers only (`sched.py`
-  can take a per-launch prefix); rollout servers stay plain `-a`. Measure `bridge_ms` per build under load.
+- Paused frame interval as a console setting (extends patch 0002): 0.25-0.5 ms for build servers.
+- Latency tier for build-phase servers: `taskpolicy -a -l 0` on fork/build servers only.
+
+### Measured so far
+Real engine, state w031 (148 vehicles), 3 towns, `rh17m bench pipeline`: 626 calls take **~630-660 ms
+sequential vs ~20 ms pipelined (27-33x)**, identical site lists (91 / 1 / 158 sites).
 
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Equivalence test passes on >= 20 states
-- [ ] `tests/unit` + ruff clean in rh17m; Railhead and rhs1 PR CI green
-- [ ] `bridge_calls` per build drops by >= 10x in Phoenix
+- [x] rhs1 unit tests (130 passed incl. 9 new) and ruff clean; rh17m unit tests and ruff clean
+- [x] `rh17m bench pipeline`: same sites on 3 real towns
+- [ ] Full-record equivalence: 23 real states labelled with `RH17M_PIPELINE=0` vs `1`
+      (`rh17m bench compare-labels A B`): options, builds and every rollout net worth identical
 
 #### Manual Verification:
 - [ ] 25-min contended window: median build_s per state <= 20 s (from 60), states/h recorded
-- [ ] No change in label content: re-label 5 already-labelled states and diff `options`, `builds`
-      (ok/cost/airport_type) and outcome values
+- [ ] rhs1 PR opened (merge is the user's call)
 
 ---
 

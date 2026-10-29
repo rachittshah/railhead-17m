@@ -68,7 +68,8 @@ def measure(task_dir: Path, log: Path | None = None, days: int = 365, forks: int
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
-    sub = {"determinism": _determinism_main, "labels": _labels_main, "step": _step_main}
+    sub = {"determinism": _determinism_main, "labels": _labels_main, "step": _step_main,
+           "pipeline": _pipeline_main, "compare-labels": _compare_labels_main}
     if argv and argv[0] in sub:
         return sub[argv[0]](argv[1:])
     return _measure_main(argv)
@@ -526,3 +527,115 @@ def _labels_main(argv: list[str]) -> int:
     print(window_line(r))
     print(json.dumps(r))
     return 0
+
+
+# ---------------------------------------------------------------- pipelined site search
+
+class SiteQuerier:
+    """rhs1's querier over a real World. With ``pipelined`` it also has ``batch``, so ``candidate_sites``
+    sends its dry-runs as one pipeline instead of one round trip per anchor."""
+
+    def __init__(self, world, pipelined: bool) -> None:
+        self.world = world
+        if pipelined:
+            self.batch = lambda calls: world.call_many(calls)
+
+    def __call__(self, method: str, args: dict):
+        return self.world.call(method, **args)
+
+
+def measure_pipeline(savegame: Path, towns: int = 3, airport_type: str = "large") -> list[dict]:
+    """``candidate_sites`` for the first ``towns`` towns of a real state, one round trip per anchor vs
+    pipelined: the two must return the same sites; the rest is what pipelining saves."""
+    from rhs1.builders.air import candidate_sites
+
+    from rh17m import tracing
+
+    rows = []
+    with tempfile.TemporaryDirectory(prefix="rh17m-pipe-") as tmp:
+        world = World.load(Path(tmp) / "w", Path(savegame))
+        try:
+            for town in world.call("towns")[:towns]:
+                out: dict = {"town": town["id"]}
+                for mode in ("sequential", "pipelined"):
+                    before = tracing.bridge_totals()
+                    t0 = time.perf_counter()
+                    sites = candidate_sites(SiteQuerier(world, mode == "pipelined"), town, airport_type)
+                    calls, _ = tracing.bridge_since(before)
+                    out[mode] = {"ms": round(1e3 * (time.perf_counter() - t0), 1), "calls": calls, "sites": sites}
+                out["same_sites"] = out["sequential"]["sites"] == out["pipelined"]["sites"]
+                out["speedup"] = round(out["sequential"]["ms"] / max(out["pipelined"]["ms"], 1e-9), 1)
+                rows.append(out)
+        finally:
+            world.close()
+    return rows
+
+
+def _pipeline_main(argv: list[str]) -> int:
+    import argparse
+
+    p = argparse.ArgumentParser(prog="rh17m bench pipeline", description=measure_pipeline.__doc__)
+    p.add_argument("--save", type=Path, default=DATA / "states" / f"{PINNED_STATE}.sav")
+    p.add_argument("--towns", type=int, default=3)
+    p.add_argument("--type", default="large")
+    a = p.parse_args(argv)
+    rows = measure_pipeline(a.save, a.towns, a.type)
+    for r in rows:
+        s, q = r["sequential"], r["pipelined"]
+        print(f"town {r['town']:>4}  sequential {s['ms']:8.1f} ms {s['calls']:5d} calls | pipelined {q['ms']:7.1f} ms "
+              f"{q['calls']:5d} calls | x{r['speedup']}  sites {len(s['sites'])}  same={r['same_sites']}")
+    brief = [{k: r[k] for k in ("town", "same_sites", "speedup")} for r in rows]
+    print(json.dumps(brief))
+    return 0 if all(r["same_sites"] for r in rows) else 1
+
+
+# ---------------------------------------------------------------- label equivalence
+
+def _first_diff(a, b, path: str = "") -> str | None:
+    """Path of the first difference between two JSON values (None when equal)."""
+    if type(a) is not type(b):
+        return path or "."
+    if isinstance(a, dict):
+        for k in sorted(set(a) | set(b)):
+            if k not in a or k not in b:
+                return f"{path}.{k}" if path else k
+            if (d := _first_diff(a[k], b[k], f"{path}.{k}" if path else k)) is not None:
+                return d
+        return None
+    if isinstance(a, list):
+        if len(a) != len(b):
+            return f"{path}[len]"
+        for i, (x, y) in enumerate(zip(a, b, strict=True)):
+            if (d := _first_diff(x, y, f"{path}[{i}]")) is not None:
+                return d
+        return None
+    return None if a == b else (path or ".")
+
+
+def compare_label_dirs(a: Path, b: Path, ignore: tuple[str, ...] = ("timing",)) -> dict:
+    """Label records of the same states labelled two ways, compared except for ``ignore`` keys (wall times):
+    options, builds and every rollout's net worth must match exactly for a change to be behaviour-neutral."""
+    a, b = Path(a), Path(b)
+    names = {p.stem for p in a.glob("*.json") if not p.name.endswith(".error.json")}
+    other = {p.stem for p in b.glob("*.json") if not p.name.endswith(".error.json")}
+    common = sorted(names & other)
+    differing = []
+    for s in common:
+        ra = {k: v for k, v in json.loads((a / f"{s}.json").read_text()).items() if k not in ignore}
+        rb = {k: v for k, v in json.loads((b / f"{s}.json").read_text()).items() if k not in ignore}
+        if (d := _first_diff(ra, rb)) is not None:
+            differing.append({"state": s, "first_diff": d})
+    return {"common": len(common), "identical": len(common) - len(differing), "differing": differing,
+            "only_a": sorted(names - other), "only_b": sorted(other - names)}
+
+
+def _compare_labels_main(argv: list[str]) -> int:
+    import argparse
+
+    p = argparse.ArgumentParser(prog="rh17m bench compare-labels", description=compare_label_dirs.__doc__)
+    p.add_argument("a", type=Path)
+    p.add_argument("b", type=Path)
+    a = p.parse_args(argv)
+    r = compare_label_dirs(a.a, a.b)
+    print(json.dumps(r, indent=1))
+    return 0 if r["common"] and not r["differing"] else 1
