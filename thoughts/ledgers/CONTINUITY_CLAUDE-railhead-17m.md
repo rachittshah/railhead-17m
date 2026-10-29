@@ -94,6 +94,16 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
         config; only text keys follow the candidate). Incumbent restored again to 1023-1627-base-s1.
 - RESUMED 2026-10-24 08:38: climb pass 10 (1369 ex, 251 val) started with teacher retrain; labellers
   train x11, val x8, test x3; watch + Trackio dashboard (:7860). Incumbent still 1023-1627-base-s1.
+  - [x] Perf (f27684c): OpenTTD servers under `taskpolicy -a` (daemon policy kept them off P-cores: 95-100 ->
+        11 ms/game day), uncompressed temp saves in label jobs (1221 -> 52 ms/save, same checksum).
+        Labels ~150/h -> 394/h, 18-20 -> 5.3 s/rollout. Build phase slower under full CPU (31 -> 60 s).
+  - [x] E2E OTel tracing (fadbcbe): src/rh17m/tracing.py, Phoenix viewer :6006 (tmux window `traces`)
+  - [x] CLIMB=0 launch switch (5d0202c)
+- PAUSED 2026-10-24 ~10:15 at user request (fans/CPU): everything stopped via scripts/stop.sh. 2,618 labelled
+  states. Incumbent restored to 1023-1627-base-s1 (two aborted passes had overwritten it). Climb passes 10/11
+  were aborted (tmux killed by an orphan sweep at 09:20; GPU run stopped by user) -> never pkill ad hoc.
+- Next: reuse live servers for rollouts (console `load`, 384 ms vs ~1.45 s start); fewer workers if fans
+  matter; resume climb; judge candidates in closed loop; HF publish needs `hf auth login`.
 
 ## Open questions
 - UNCONFIRMED: HF write token (user must run `hf auth login`).
