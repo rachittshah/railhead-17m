@@ -79,6 +79,7 @@ class FakeProc:
 class FakeServer:
     made: ClassVar[list] = []
     events: ClassVar[list] = []
+    on_stop = None
 
     def __init__(self, workdir, config) -> None:
         self.workdir, self.config = Path(workdir), config
@@ -104,6 +105,8 @@ class FakeServer:
 
     def stop(self) -> None:
         FakeServer.events.append(("stop", self.workdir.name))
+        if FakeServer.on_stop is not None:
+            FakeServer.on_stop()  # a signal arriving while this server is being stopped
         self.running = False
         self.stops += 1
 
@@ -131,6 +134,7 @@ class FakeWorld:
 def _reset():
     FakeServer.made = []
     FakeServer.events = []
+    FakeServer.on_stop = None
 
 
 @pytest.fixture
@@ -343,6 +347,47 @@ def test_shutdown_asks_every_engine_to_quit_before_waiting_for_any(tmp_path, sav
     assert {n for k, n in FakeServer.events if k == "quit"} == {a.server.workdir.name, b.server.workdir.name}
 
 
+def test_a_shutdown_interrupted_by_another_finishes_the_job(tmp_path, saves):
+    # A worker that exits normally runs shutdown at exit; if the parent's SIGTERM lands in the middle, its handler
+    # calls shutdown again and then kills the process: the second call must leave nothing for the first to do.
+    p = pool.WorldPool(FakeWorld, FakeWorld.load, base=tmp_path / "pool", recycle=50, fence_timeout=0.3)
+    a = p.acquire(tmp_path / "w", saves["a"])
+    b = p.acquire(tmp_path / "w", saves["a"])
+    p.release(b)
+    seen = []
+
+    def interrupt():
+        FakeServer.on_stop = None  # the signal arrives once
+        p.shutdown()
+        seen.append(([s.running for s in (a.server, b.server)], (tmp_path / "pool").exists()))
+
+    FakeServer.on_stop = interrupt
+    p.shutdown()
+    assert seen == [([False, False], False)]  # everything was stopped and removed before the nested call returned
+
+
+def test_the_pool_says_when_it_is_stopping(tmp_path, saves):
+    p = pool.WorldPool(FakeWorld, FakeWorld.load, base=tmp_path / "pool", recycle=50, fence_timeout=0.3)
+    p.acquire(tmp_path / "w", saves["a"])
+    seen = []
+    FakeServer.on_stop = lambda: seen.append(p.stopping)
+    assert not p.stopping
+    p.shutdown()
+    assert seen == [True] and not p.stopping
+
+
+def test_shutdown_leaves_the_control_connections_alone(tmp_path, saves):
+    # closing one sends a packet under the connection's send lock, which a signal may have interrupted
+    p = pool.WorldPool(FakeWorld, FakeWorld.load, base=tmp_path / "pool", recycle=50, fence_timeout=0.3)
+    w = p.acquire(tmp_path / "w", saves["a"])
+    p.release(w)
+    p.release(p.acquire(tmp_path / "w", saves["b"]))  # a reload: the slot now has a control connection
+    slot = p._all[0]
+    assert slot.ctl is not None
+    p.shutdown()
+    assert slot.ctl.alive and w.server.stops == 1
+
+
 def test_default_is_off_and_install_is_idempotent_and_restorable(monkeypatch):
     monkeypatch.delenv("RH17M_POOL", raising=False)
     was = pool.installed()
@@ -461,6 +506,27 @@ def test_a_second_sigterm_during_shutdown_does_not_cut_it_short(monkeypatch):
     handler = pool._sigterm_handler(shutdown, signal.SIG_DFL)
     handler(signal.SIGTERM, None)
     assert calls == ["shutdown", "signal", ("kill", signal.SIGTERM)]  # one shutdown, one death, at the end
+
+
+def test_sigterm_during_an_exit_time_shutdown_is_deferred_not_nested(monkeypatch):
+    # Nested, the handler would re-enter code the interrupted shutdown is in the middle of (a socket send holding
+    # its lock: a self-deadlock that hung a labeller at exit) and then kill the process under it.
+    calls = []
+    h = pool._sigterm_handler(lambda: calls.append("shutdown"), signal.SIG_DFL, busy=lambda: True)
+    h(signal.SIGTERM, None)
+    assert calls == [] and h.deferred == [signal.SIGTERM]
+
+
+def test_exit_hook_hands_a_deferred_sigterm_back_once_the_shutdown_is_done(monkeypatch):
+    calls = []
+    monkeypatch.setattr(pool.os, "kill", lambda pid, sig: calls.append(("kill", sig)))
+    h = pool._sigterm_handler(lambda: None, signal.SIG_DFL)
+    pool._exit_hook(lambda: calls.append("shutdown"), h)()
+    assert calls == ["shutdown"]  # nothing arrived: the process just exits
+    h.deferred.append(signal.SIGTERM)
+    pool._exit_hook(lambda: calls.append("shutdown"), h)()
+    assert calls == ["shutdown", "shutdown", ("kill", signal.SIGTERM)]
+    assert h.deferred == []
 
 
 def test_sigterm_chains_to_a_handler_that_was_already_there(monkeypatch):

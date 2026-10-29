@@ -94,7 +94,12 @@ class WorldPool:
         self._idle: list[_Slot] = []
         self._all: list[_Slot] = []
         self._seq = 0
+        self._stopping = 0
         self._pid = os.getpid()
+
+    @property
+    def stopping(self) -> bool:
+        return self._stopping > 0
 
     # ------------------------------------------------------------------ acquire / release
     def acquire(self, workdir: Path, savegame: Path, config: ServerConfig | None = None, speed: int = 0) -> World:
@@ -144,25 +149,32 @@ class WorldPool:
         return True
 
     def shutdown(self) -> None:
-        """Stop every server (idle or lent out) and remove the pool's directory. Idempotent. Every engine is
-        asked to quit before the first is waited for, so a SIGTERM that has to be answered quickly costs one
-        engine's exit time, not the sum."""
+        """Stop every server (idle or lent out) and remove the pool's directory. Idempotent, and safe to
+        interrupt: a server stays registered until it is stopped, so a second call (the SIGTERM handler landing
+        in the middle of the exit-time call of a worker that was already leaving) finishes what the first
+        started, and the process may die right after it. Every engine is asked to quit before the first is
+        waited for, so answering a SIGTERM costs one engine's exit time, not the sum."""
         if self._pid != os.getpid():  # a forked child must not stop its parent's servers
             self._check_pid()
             return
-        with self._lock:
-            slots = list(self._all)
-            self._all.clear()
-            self._idle.clear()
-            base, self.base = self.base, None
-        if slots:
-            log.info("pool: stopping %d server(s)", len(slots))
-        for slot in slots:
-            _ask_quit(slot.server)
-        for slot in slots:
-            self._discard(slot)
-        if base is not None:
-            shutil.rmtree(base, ignore_errors=True)
+        self._stopping += 1
+        try:
+            with self._lock:
+                slots = list(self._all)
+                base = self.base
+            if slots:
+                log.info("pool: stopping %d server(s)", len(slots))
+            for slot in slots:
+                _ask_quit(slot.server)
+            for slot in slots:
+                self._discard(slot, close_ctl=False)
+            with self._lock:
+                self._idle.clear()
+                self.base = None
+            if base is not None:
+                shutil.rmtree(base, ignore_errors=True)
+        finally:
+            self._stopping -= 1
 
     # ------------------------------------------------------------------ internals
     def _check_pid(self) -> None:
@@ -253,13 +265,11 @@ class WorldPool:
                 raise TimeoutError(f"the engine did not switch games within {self.fence_timeout}s: {out!r}")
             time.sleep(0.005)
 
-    def _discard(self, slot: _Slot) -> None:
-        with self._lock:
-            if slot in self._all:
-                self._all.remove(slot)
-            if slot in self._idle:
-                self._idle.remove(slot)
-        if slot.ctl is not None:
+    def _discard(self, slot: _Slot, close_ctl: bool = True) -> None:
+        """Stop ``slot``'s server and forget it (in that order: see ``shutdown``). Closing the control connection
+        sends a packet under its send lock, so ``shutdown`` (which a signal may have interrupted mid-send) leaves
+        it: the engine's exit closes the socket."""
+        if slot.ctl is not None and close_ctl:
             with contextlib.suppress(Exception):
                 slot.ctl.close()
         try:
@@ -268,6 +278,11 @@ class WorldPool:
             log.warning("pool: could not stop a server", exc_info=True)
         if slot.dir is not None:
             shutil.rmtree(slot.dir, ignore_errors=True)
+        with self._lock:
+            if slot in self._all:
+                self._all.remove(slot)
+            if slot in self._idle:
+                self._idle.remove(slot)
 
 
 def _ask_quit(server) -> None:
@@ -293,17 +308,28 @@ def fresh_load(workdir: Path, savegame: Path, config: ServerConfig | None = None
     return raw.__func__(World, workdir, savegame, config, speed)
 
 
-def _sigterm_handler(shutdown, previous):
+def _sigterm_handler(shutdown, previous, busy=None):
     """Stop the pooled servers, then let SIGTERM do what it would have done (the engines run in their own
-    sessions, so killing the worker alone would orphan them)."""
-    running = []
+    sessions, so killing the worker alone would orphan them). A SIGTERM that arrives while a shutdown is
+    already running (``busy``: the exit-time call of a worker that was leaving anyway, which Pool.terminate's
+    SIGTERM often hits) must not run a second one inside it: the interrupted code may hold a lock the new one
+    needs, and killing the process afterwards would cut the first short. It is parked in ``handler.deferred``
+    for ``_exit_hook`` to hand back when the first is done."""
+    running: list = []
+    deferred: list = []
 
     def handler(signum, frame):
         if running:  # the same request again while the engines are stopping: let the first one finish
             return
+        if busy is not None and busy():
+            deferred.append(signum)
+            return
         running.append(True)
         try:
             shutdown()
+        except BaseException:
+            log.exception("pool: shutdown on SIGTERM failed")  # the process dies right after: say why
+            raise
         finally:
             if callable(previous):
                 running.clear()  # that handler decides whether the process lives; a later SIGTERM is a new request
@@ -311,7 +337,21 @@ def _sigterm_handler(shutdown, previous):
             else:
                 signal.signal(signum, signal.SIG_DFL)
                 os.kill(os.getpid(), signum)
+
+    handler.deferred = deferred
     return handler
+
+
+def _exit_hook(shutdown, handler):
+    """The atexit callback: ``shutdown``, then the SIGTERM that arrived during it (if any) takes effect."""
+    def run():
+        try:
+            shutdown()
+        finally:
+            if handler is not None and handler.deferred:
+                handler.deferred.clear()
+                os.kill(os.getpid(), signal.SIGTERM)
+    return run
 
 
 def install() -> bool:
@@ -335,14 +375,16 @@ def install() -> bool:
 
     World.load = classmethod(load)
     World.close = close
-    atexit.register(wp.shutdown)
-    _STATE.update(pool=wp, load=orig_load, close=orig_close)
+    handler = None
     if threading.current_thread() is threading.main_thread():
         previous = signal.getsignal(signal.SIGTERM)
         if previous is not signal.SIG_IGN:
-            handler = _sigterm_handler(wp.shutdown, previous)
+            handler = _sigterm_handler(wp.shutdown, previous, busy=lambda: wp.stopping)
             signal.signal(signal.SIGTERM, handler)
             _STATE.update(handler=handler, previous=previous)
+    hook = _exit_hook(wp.shutdown, handler)
+    atexit.register(hook)
+    _STATE.update(pool=wp, load=orig_load, close=orig_close, hook=hook)
     return True
 
 
@@ -352,7 +394,7 @@ def uninstall() -> None:
         return
     wp = _STATE["pool"]
     World.load, World.close = _STATE["load"], _STATE["close"]
-    atexit.unregister(wp.shutdown)
+    atexit.unregister(_STATE["hook"])
     handler = _STATE.get("handler")
     if handler is not None and signal.getsignal(signal.SIGTERM) is handler:
         signal.signal(signal.SIGTERM, _STATE["previous"])
