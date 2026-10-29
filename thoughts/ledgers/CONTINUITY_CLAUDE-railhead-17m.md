@@ -102,8 +102,9 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
 - PAUSED 2026-10-24 ~10:15 at user request (fans/CPU): everything stopped via scripts/stop.sh. 2,618 labelled
   states. Incumbent restored to 1023-1627-base-s1 (two aborted passes had overwritten it). Climb passes 10/11
   were aborted (tmux killed by an orphan sweep at 09:20; GPU run stopped by user) -> never pkill ad hoc.
-- Next: reuse live servers for rollouts (console `load`, 384 ms vs ~1.45 s start); fewer workers if fans
-  matter; resume climb; judge candidates in closed loop; HF publish needs `hf auth login`.
+- Next: CPU hyperoptimisation plan `thoughts/shared/plans/2026-10-29-cpu-hyperoptimize.md` (Phase 0
+  instrumentation first: bridge-call count per build decides Phase 2 vs 3 order); resume climb; judge
+  candidates in closed loop; HF publish needs `hf auth login`.
 
 ## Open questions
 - UNCONFIRMED: HF write token (user must run `hf auth login`).
