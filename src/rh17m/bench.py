@@ -5,8 +5,8 @@ numbers size every labelling run. ``measure`` times a fresh start state; with ``
 action log to its end, so the timings reflect a grown network (vehicles and stations slow the step).
 
 Subcommands (``rh17m bench <name>``): ``step`` A/Bs an engine binary against the stock one, ``determinism``
-checks a binary reaches the same game state as the stock one, ``labels`` reports the labelling rate of the
-last N minutes. Without a subcommand, ``rh17m bench <task_dir>`` runs ``measure``.
+checks a binary reaches the same game state as the stock one, ``pool`` checks a game loaded into a reused
+server is the game a fresh server gives, ``labels`` reports the labelling rate of the last N minutes. Without a subcommand, ``rh17m bench <task_dir>`` runs ``measure``.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def measure(task_dir: Path, log: Path | None = None, days: int = 365, forks: int
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     sub = {"determinism": _determinism_main, "labels": _labels_main, "step": _step_main,
-           "pipeline": _pipeline_main, "compare-labels": _compare_labels_main}
+           "pipeline": _pipeline_main, "compare-labels": _compare_labels_main, "pool": _pool_main}
     if argv and argv[0] in sub:
         return sub[argv[0]](argv[1:])
     return _measure_main(argv)
@@ -467,15 +467,15 @@ def _aggregate(rows: list[dict], since_min: float) -> dict:
     return {"states": len(rows), "states_per_h": round(len(rows) * 60 / since_min, 1),
             "rollouts": sum(r["rollouts"] for r in rows), "build_s_median": med("build_s"),
             "s_per_rollout_median": med("s_per_rollout"), "bridge_calls_median": med("bridge_calls"),
-            "bridge_ms_median": med("bridge_ms", 1)}
+            "bridge_ms_median": med("bridge_ms", 1), "server_starts_median": med("server_starts", 1)}
 
 
 def label_window(labels: Path, since_min: float = 25, now: float | None = None) -> dict:
     """The labelling rate of the last ``since_min`` minutes, from the records' mtimes: states, states/h,
     rollouts (aliases of hold excluded: they repeat its rollouts), and the medians per state of build_s,
-    seconds per rollout ((total_s - build_s) / rollouts; states with no rollouts have none) and the
-    GameScript calls of the build phase (records that carry them). ``by_seeds`` splits by the number of
-    rollout seeds (1 = train, 3 = val/test)."""
+    seconds per rollout ((total_s - build_s) / rollouts; states with no rollouts have none), the
+    GameScript calls of the build phase and the OpenTTD processes the job started (records that carry them).
+    ``by_seeds`` splits by the number of rollout seeds (1 = train, 3 = val/test)."""
     cutoff = (time.time() if now is None else now) - 60 * since_min
     rows = []
     for path in Path(labels).glob("*.json"):
@@ -493,7 +493,8 @@ def label_window(labels: Path, since_min: float = 25, now: float | None = None) 
         build_s, total_s = t.get("build_s"), t.get("total_s")
         rows.append({"seeds": len(rec.get("seeds") or []), "rollouts": rollouts, "build_s": build_s,
                      "s_per_rollout": (total_s - build_s) / rollouts if rollouts and None not in (build_s, total_s)
-                     else None, "bridge_calls": t.get("bridge_calls"), "bridge_ms": t.get("bridge_ms")})
+                     else None, "bridge_calls": t.get("bridge_calls"), "bridge_ms": t.get("bridge_ms"),
+                     "server_starts": t.get("server_starts")})
     out = {"since_min": since_min, **_aggregate(rows, since_min)}
     out["by_seeds"] = {k: _aggregate([r for r in rows if r["seeds"] == k], since_min)
                        for k in sorted({r["seeds"] for r in rows})}
@@ -510,6 +511,8 @@ def window_line(r: dict) -> str:
             s += f", {a['s_per_rollout_median']:.1f} s/rollout"
         if a["bridge_calls_median"] is not None:
             s += f", gs calls {a['bridge_calls_median']:.0f}"
+        if a["server_starts_median"] is not None:
+            s += f", starts {a['server_starts_median']:g}"
         return s
 
     return f"last {r['since_min']:g} min: {part(r)}" + "".join(
@@ -639,3 +642,180 @@ def _compare_labels_main(argv: list[str]) -> int:
     r = compare_label_dirs(a.a, a.b)
     print(json.dumps(r, indent=1))
     return 0 if r["common"] and not r["differing"] else 1
+
+
+# ---------------------------------------------------------------- persistent server pool
+
+def observe_game(world, days: int, seed: int) -> dict:
+    """What a loaded game is, as the bridge sees it: the bound company, the checksum right after the load, the
+    speed, a dry-run airport quote, a real route build between the first two towns (``build_affordable``), then
+    a reseed and ``days`` of play (checksum, ticks, net worth). Two worlds from the same savegame must give the
+    same observation however their servers got there."""
+    import dataclasses
+
+    from railhead.actions import to_gs
+    from railhead.bridge import BridgeError
+
+    from rh17m.labels import _net_worth, build_affordable
+
+    out: dict = {"events_at_load": len(world.bridge.events), "speed": world.admin.rcon("gamespeed")[0],
+                 "company": world.state()["company"], "checksum_at_load": world.call("checksum")}
+    towns = world.call("towns")
+    method, args = to_gs("air.airport", {"tile": int(towns[0]["tile"]), "type": "large", "join_station": -1,
+                                         "dry_run": True})
+    try:
+        out["dry_run"] = world.call(method, **args)
+    except BridgeError as e:
+        out["dry_run"] = {"refused": e.code}
+    if len(towns) > 1:
+        br, used = build_affordable(world, towns[0]["id"], towns[1]["id"])
+        out["build"] = {**dataclasses.asdict(br), "ladder": list(used)}
+    rs = world.admin.rcon(f"reseed {seed & 0xFFFFFFFF}")
+    out["reseed"] = bool(rs) and rs[0].startswith("Reseeded")
+    world.step(days=days, timeout=3600)
+    out["checksum_after"] = world.call("checksum")
+    out["ticks"] = world.state()["ticks"]
+    out["net_worth"], out["money"] = _net_worth(world)
+    return out
+
+
+def pool_mismatches(fresh: dict, pooled: dict) -> list[str]:
+    """The observations in which a pooled game differs from a fresh one."""
+    return [k for k in sorted(set(fresh) | set(pooled)) if _first_diff(fresh.get(k), pooled.get(k)) is not None]
+
+
+def measure_pool(saves: list[Path], days: int = 91, seed: int = 1, abuse: bool = True, wp=None, fresh=None,
+                 observe=None) -> dict:
+    """Per save: observe a game loaded into a fresh server, then the same save loaded through one ``WorldPool``
+    (a single server, reused for every save in turn and once more for the first, so each reload follows a
+    game that was played, built on and left behind). With ``abuse`` the previous owner hands its World back
+    with a step still in flight, the worst a failed job leaves. Every pooled observation must equal its fresh
+    one; ``pooled_starts`` is the OpenTTD processes the pooled arm started (1 when reuse works)."""
+    from rh17m import pool as P
+    from rh17m import tracing
+
+    observe = observe or observe_game
+    fresh = fresh or P.fresh_load
+    saves = [Path(x) for x in saves]
+    with tempfile.TemporaryDirectory(prefix="rh17m-pool-bench-") as tmp:
+        tmp = Path(tmp)
+        wp = wp or P.WorldPool(World, P.fresh_load, base=tmp / "pool", recycle=10**6)
+        try:
+            ref: dict[Path, dict] = {}
+            for i, save in enumerate(saves):
+                w, fresh_s = _timed(fresh, tmp / f"fresh{i}", save)
+                try:
+                    ref[save] = {**observe(w, days, seed), "_load_s": fresh_s}
+                finally:
+                    w.close()
+            starts0 = tracing.server_starts()
+            rows = []
+            for i, save in enumerate([*saves, saves[0]]):
+                w, pooled_s = _timed(wp.acquire, tmp / f"pooled{i}", save)
+                try:
+                    got = observe(w, days, seed)
+                    if abuse:
+                        w.admin.send_gs({"id": 10**9 + i, "m": "step", "a": {"days": 30}})
+                finally:
+                    wp.release(w)
+                want = {k: v for k, v in ref[save].items() if k != "_load_s"}
+                bad = pool_mismatches(want, got)
+                meta = save.with_suffix(".json")
+                veh = json.loads(meta.read_text()).get("vehicles") if meta.exists() else None
+                rows.append({"save": save.name, "vehicles": veh, "ok": not bad, "mismatch": bad,
+                             "fresh_load_ms": round(1e3 * ref[save]["_load_s"]), "pooled_load_ms": round(1e3 * pooled_s),
+                             "fresh": want, "pooled": got})
+            pooled_starts = tracing.server_starts() - starts0
+        finally:
+            wp.shutdown()
+    return {"ok": all(r["ok"] for r in rows), "rows": rows, "pooled_starts": pooled_starts, "days": days}
+
+
+def _rss_mb(pid: int) -> float | None:
+    import subprocess
+
+    out = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], check=False, capture_output=True,
+                         text=True).stdout.split()
+    return round(int(out[0]) / 1024, 1) if out else None
+
+
+def _cpu_s(pid: int) -> float | None:
+    import subprocess
+
+    out = subprocess.run(["ps", "-o", "cputime=", "-p", str(pid)], check=False, capture_output=True,
+                         text=True).stdout.strip()
+    if not out:
+        return None
+    m, _, s = out.partition(":")
+    return 60 * int(m) + float(s)
+
+
+def measure_pool_soak(save: Path, reloads: int = 200, days: int = 30, seed: int = 1, every: int = 50) -> dict:
+    """One pooled server, never recycled, loaded ``reloads`` times with ``days`` of play after each: its RSS
+    every ``every`` reloads (does anything leak across loads?), the reload time, whether every replay of the
+    same save and seed ends in one game state, and what the server costs idle (CPU seconds per second)."""
+    from rh17m import pool as P
+
+    save = Path(save)
+    rss, load_ms, checks = [], [], set()
+    with tempfile.TemporaryDirectory(prefix="rh17m-soak-") as tmp:
+        wp = P.WorldPool(World, P.fresh_load, base=Path(tmp) / "pool", recycle=10**9)
+        pid = None
+        try:
+            for i in range(reloads + 1):
+                w, s = _timed(wp.acquire, Path(tmp) / "w", save)
+                try:
+                    pid = w.server.proc.pid
+                    load_ms.append(1e3 * s)
+                    if i % every == 0:
+                        rss.append((i, _rss_mb(pid)))
+                    w.admin.rcon(f"reseed {seed & 0xFFFFFFFF}")
+                    w.step(days=days, timeout=3600)
+                    checks.add(json.dumps(w.call("checksum"), sort_keys=True))
+                finally:
+                    wp.release(w)
+            if rss[-1][0] != reloads:
+                rss.append((reloads, _rss_mb(pid)))
+            c0, t0 = _cpu_s(pid), time.perf_counter()
+            time.sleep(5)
+            c1 = _cpu_s(pid)
+            idle = round((c1 - c0) / (time.perf_counter() - t0), 3) if None not in (c0, c1) else None
+        finally:
+            wp.shutdown()
+    return {"reloads": reloads, "rss_mb": rss, "distinct_states": len(checks),
+            "first_load_ms": round(load_ms[0]), "reload_ms_median": round(statistics.median(load_ms[1:])),
+            "reload_ms_max": round(max(load_ms[1:])), "idle_cpu": idle}
+
+
+def _pool_main(argv: list[str]) -> int:
+    import argparse
+
+    p = argparse.ArgumentParser(prog="rh17m bench pool", description=measure_pool.__doc__)
+    p.add_argument("--saves", nargs="*", type=Path, default=None, help="default: spread over data/states by vehicles")
+    p.add_argument("--root", type=Path, default=DATA / "states")
+    p.add_argument("--count", type=int, default=5)
+    p.add_argument("--days", type=int, default=91)
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--no-abuse", action="store_true", help="hand Worlds back clean instead of mid-step")
+    p.add_argument("--soak", type=int, default=0, metavar="N", help="also reload one server N times and report its RSS")
+    p.add_argument("--soak-save", type=Path, default=DATA / "states" / f"{PINNED_STATE}.sav")
+    a = p.parse_args(argv)
+    saves = a.saves if a.saves else pick_saves(a.root, a.count)
+    missing = [str(x) for x in saves if not Path(x).is_file()]
+    if missing or not saves:
+        p.error(f"not found: {', '.join(missing) or 'no saves under ' + str(a.root)}")
+    r = measure_pool(saves, a.days, a.seed, abuse=not a.no_abuse)
+    for row in r["rows"]:
+        b = row["fresh"].get("build") or {}
+        print(f"{'OK' if row['ok'] else 'MISMATCH':8} {row['save']}  veh={row['vehicles']}  "
+              f"load fresh {row['fresh_load_ms']} ms / pooled {row['pooled_load_ms']} ms  "
+              f"build ok={b.get('ok')} cost={b.get('cost')}  "
+              + ("" if row["ok"] else f"differs: {','.join(row['mismatch'])}"), flush=True)
+    print(f"pool: {sum(x['ok'] for x in r['rows'])}/{len(r['rows'])} pooled games identical to fresh ones "
+          f"({a.days} d), {r['pooled_starts']} server start(s) in the pooled arm")
+    ok = r["ok"] and r["pooled_starts"] == 1
+    if a.soak:
+        soak = measure_pool_soak(a.soak_save, a.soak)
+        print(json.dumps(soak))
+        ok = ok and soak["distinct_states"] == 1
+    return 0 if ok else 1

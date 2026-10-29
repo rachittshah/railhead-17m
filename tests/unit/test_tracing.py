@@ -254,3 +254,25 @@ def test_install_counts_world_calls_even_when_tracing_is_off(monkeypatch):
     b0 = tracing.bridge_totals()
     assert w.call("state") == "state"
     assert tracing.bridge_since(b0)[0] == 1
+
+
+class StartableServer:
+    def start(self):
+        return self
+
+
+def test_server_starts_are_counted_per_call_and_idempotently():
+    tracing.count_starts(StartableServer)
+    tracing.count_starts(StartableServer)  # installing twice must not count a start twice
+    n0 = tracing.server_starts()
+    StartableServer().start()
+    StartableServer().start()
+    assert tracing.server_starts() - n0 == 2
+
+
+def test_install_counts_server_starts_even_when_tracing_is_off(monkeypatch):
+    from railhead.server import OpenTTDServer
+
+    monkeypatch.setenv("RH17M_TRACE", "0")
+    tracing.install()
+    assert getattr(OpenTTDServer.start, "_rh17m_counted_starts", False)

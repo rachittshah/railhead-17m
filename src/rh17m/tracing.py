@@ -15,6 +15,7 @@ GameScript round trips are counted separately from the spans (``count_calls``): 
 call and its wall time to a context-local running total, whether or not anything is traced. A span opened
 with ``bridge=True`` reports the difference over its lifetime as ``bridge_calls`` / ``bridge_ms``, and
 ``bridge_totals`` / ``bridge_since`` give the same to code that records the numbers itself (label records).
+OpenTTD process starts are counted the same way (``server_starts``): what a persistent pool (pool.py) saves.
 """
 
 from __future__ import annotations
@@ -57,6 +58,7 @@ class _NoSpan:
 NOOP = _NoSpan()
 
 _bridge: ContextVar[list] = ContextVar("rh17m_bridge")  # [round trips, seconds] since this context began
+_starts: ContextVar[list] = ContextVar("rh17m_starts")  # [OpenTTD processes started] since this context began
 
 
 def endpoint() -> str:
@@ -208,6 +210,32 @@ def count_calls(owner: type, attr: str = "call") -> None:
             acc[1] += time.perf_counter() - t0
 
     counted._rh17m_counted = True
+    setattr(owner, attr, counted)
+
+
+def server_starts() -> int:
+    """OpenTTD processes started so far in this context (a running total: subtract an earlier reading to
+    measure a stretch of code). A pooled reload is not a start."""
+    try:
+        return _starts.get()[0]
+    except LookupError:
+        _starts.set([0])
+        return 0
+
+
+def count_starts(owner: type, attr: str = "start") -> None:
+    """Count ``owner.attr`` (railhead's ``OpenTTDServer.start``) as one server start per call. Idempotent."""
+    fn = owner.__dict__[attr]
+    if getattr(fn, "_rh17m_counted_starts", False):
+        return
+
+    @functools.wraps(fn)
+    def counted(*args, **kwargs):
+        server_starts()  # make sure this context has its counter
+        _starts.get()[0] += 1
+        return fn(*args, **kwargs)
+
+    counted._rh17m_counted_starts = True
     setattr(owner, attr, counted)
 
 
@@ -366,6 +394,7 @@ def install() -> None:
 
     W = wld.World
     count_calls(W)
+    count_starts(srv.OpenTTDServer)
     if os.environ.get("RH17M_TRACE", "1") == "0":
         return
     wrap(srv.OpenTTDServer, "start", "server.start", lambda self: {"workdir": _name(self.workdir)})

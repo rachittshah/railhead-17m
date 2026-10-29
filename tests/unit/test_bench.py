@@ -14,7 +14,7 @@ from rh17m import bench
 NOW = 1_800_000_000.0
 
 
-def _record(seeds, build_s, total_s, rollouts, aliases=0, bridge_calls=None):
+def _record(seeds, build_s, total_s, rollouts, aliases=0, bridge_calls=None, server_starts=None):
     """A label record with ``rollouts`` rollouts per simulated option (hold + one built option) and
     ``aliases`` options that reuse hold's rollouts (those do not count)."""
     outcomes = {"hold": {"rollouts": [{}] * rollouts}, "r1": {"rollouts": [{}] * rollouts}}
@@ -23,6 +23,8 @@ def _record(seeds, build_s, total_s, rollouts, aliases=0, bridge_calls=None):
     timing = {"build_s": build_s, "total_s": total_s}
     if bridge_calls is not None:
         timing.update(bridge_calls=bridge_calls, bridge_ms=bridge_calls * 1.5)
+    if server_starts is not None:
+        timing["server_starts"] = server_starts
     return {"seeds": list(range(seeds)), "outcomes": outcomes, "timing": timing}
 
 
@@ -92,6 +94,17 @@ def test_label_window_without_records_or_bridge_numbers(tmp_path):
     r = bench.label_window(tmp_path, since_min=25, now=NOW)
     assert r["bridge_calls_median"] is None
     assert "gs calls" not in bench.window_line(r)
+
+
+def test_label_window_reports_server_starts_per_job(tmp_path):
+    _put(tmp_path, "a.json", _record(1, 60, 110, 1, server_starts=20), age_min=1)
+    _put(tmp_path, "b.json", _record(1, 50, 90, 1, server_starts=3), age_min=2)
+    _put(tmp_path, "c.json", _record(1, 50, 90, 1, server_starts=2), age_min=2)
+    _put(tmp_path, "d.json", _record(1, 50, 90, 1), age_min=2)  # a record from before the counter
+    r = bench.label_window(tmp_path, since_min=25, now=NOW)
+    assert r["server_starts_median"] == 3
+    assert "starts 3" in bench.window_line(r)
+    assert "starts" not in bench.window_line(bench.label_window(tmp_path / "none", since_min=25, now=NOW))
 
 
 def test_window_line_is_one_line_with_the_headline_numbers(labels_dir):
@@ -214,3 +227,86 @@ def test_step_ratio_alternates_arms_and_reports_the_speedup(tmp_path, monkeypatc
     assert calls == ["stock", "variant"] * 3
     assert res["stock_ms_per_day"] == 10.0 and res["variant_ms_per_day"] == 8.5
     assert res["ratio"] == pytest.approx(0.85) and res["faster_pct"] == pytest.approx(15.0)
+
+
+# ---------------------------------------------------------------- bench pool
+
+class GameWorld:
+    """A World that is just the savegame it came from."""
+
+    def __init__(self, save):
+        self.game = save.read_text()
+        self.sent = []
+        self.closed = False
+        self.bridge = type("B", (), {"events": []})()
+        self.admin = type("A", (), {"send_gs": self.sent.append})()
+
+    def close(self):
+        self.closed = True
+
+
+class StubPool:
+    def __init__(self, corrupt=None):
+        self.corrupt, self.acquired, self.released = corrupt, [], []
+
+    def acquire(self, workdir, save, config=None, speed=0):
+        w = GameWorld(save)
+        if save.name == self.corrupt:
+            w.game += " (leftover from the previous game)"
+        self.acquired.append(w)
+        return w
+
+    def release(self, w):
+        self.released.append(w)
+        return True
+
+    def shutdown(self):
+        pass
+
+
+def _pool_saves(tmp_path, n=3):
+    out = []
+    for i in range(n):
+        p = tmp_path / f"s{i}.sav"
+        p.write_text(f"game {i}")
+        out.append(p)
+    return out
+
+
+def _observe(world, days, seed):
+    return {"game": world.game, "days": days, "seed": seed}
+
+
+def test_pool_mismatches_names_the_observations_that_differ():
+    a = {"company": 0, "checksum": {"h": 1}, "build": {"ok": True, "cost": 5}}
+    assert bench.pool_mismatches(a, {**a, "build": {"ok": True, "cost": 5}}) == []
+    assert bench.pool_mismatches(a, {**a, "checksum": {"h": 2}, "company": 1}) == ["checksum", "company"]
+    assert bench.pool_mismatches(a, {"company": 0, "checksum": {"h": 1}}) == ["build"]
+
+
+def test_measure_pool_compares_every_pooled_game_with_a_fresh_one(tmp_path):
+    saves = _pool_saves(tmp_path)
+    stub = StubPool()
+    r = bench.measure_pool(saves, days=91, seed=7, wp=stub, fresh=lambda d, s: GameWorld(s), observe=_observe)
+    # each save once, then the first again: a reload after other games must give the same game as the first
+    assert [row["save"] for row in r["rows"]] == ["s0.sav", "s1.sav", "s2.sav", "s0.sav"]
+    assert r["ok"] and all(row["ok"] for row in r["rows"])
+    assert stub.released == stub.acquired  # every pooled World went back
+
+
+def test_measure_pool_leaves_a_step_in_flight_when_it_hands_a_world_back(tmp_path):
+    stub = StubPool()
+    bench.measure_pool(_pool_saves(tmp_path, 2), wp=stub, fresh=lambda d, s: GameWorld(s), observe=_observe)
+    assert all(w.sent and w.sent[0]["m"] == "step" for w in stub.acquired)
+    stub = StubPool()
+    bench.measure_pool(_pool_saves(tmp_path, 2), abuse=False, wp=stub, fresh=lambda d, s: GameWorld(s),
+                       observe=_observe)
+    assert not any(w.sent for w in stub.acquired)
+
+
+def test_measure_pool_flags_a_pooled_game_that_is_not_the_fresh_one(tmp_path):
+    r = bench.measure_pool(_pool_saves(tmp_path), wp=StubPool(corrupt="s1.sav"),
+                           fresh=lambda d, s: GameWorld(s), observe=_observe)
+    assert not r["ok"]
+    assert [row["ok"] for row in r["rows"]] == [True, False, True, True]
+    assert r["rows"][1]["mismatch"] == ["game"]

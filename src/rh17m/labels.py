@@ -198,6 +198,7 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
     task = TaskSpec.load(find_task(meta.task_id))
     t0 = time.perf_counter()
     gs0 = tracing.bridge_totals()
+    starts0 = tracing.server_starts()
     from rh17m.dataset import map_split
 
     split = map_split(meta.task_id)
@@ -271,8 +272,8 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
                     "nw0": nw0, "money0": money0, "rendered_state": rendered,
                     "candidates": [{**dataclasses.asdict(c), **extras.get(c.candidate_id, {})} for c in cands],
                     "expansions": as_dicts(exps), "options": options, "uninformative": "no_build",
-                    "builds": builds, "timing": {"build_s": round(t_build, 2), "total_s": round(t_build, 2),
-                                                  "bridge_calls": gs_calls, "bridge_ms": round(gs_ms, 1)}}
+                    "builds": builds, "timing": _timing(t_build, t_build, gs_calls, gs_ms,
+                                                        tracing.server_starts() - starts0)}
         # No need to simulate past the end of the game (horizon + run-off year), where the arena scores.
         left = meta.end_date + 365 - meta.date
         chunks = max(1, min(cfg.chunks, -(-left // cfg.chunk_days)))
@@ -289,9 +290,15 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
         "candidates": [{**dataclasses.asdict(c), **extras.get(c.candidate_id, {})} for c in cands],
         "expansions": as_dicts(exps), "options": options,
         "outcomes": outcomes,
-        "timing": {"build_s": round(t_build, 2), "total_s": round(time.perf_counter() - t0, 2),
-                   "bridge_calls": gs_calls, "bridge_ms": round(gs_ms, 1)},
+        "timing": _timing(t_build, time.perf_counter() - t0, gs_calls, gs_ms, tracing.server_starts() - starts0),
     }
+
+
+def _timing(build_s: float, total_s: float, gs_calls: int, gs_ms: float, server_starts: int) -> dict:
+    """The record's ``timing``: wall seconds of the build phase and of the job, the GameScript round trips of
+    the build phase, and the OpenTTD processes the whole job started (a pooled reload is not a start)."""
+    return {"build_s": round(build_s, 2), "total_s": round(total_s, 2), "bridge_calls": gs_calls,
+            "bridge_ms": round(gs_ms, 1), "server_starts": server_starts}
 
 
 def _write_atomic(path: Path, obj: dict) -> None:
