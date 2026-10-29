@@ -256,12 +256,15 @@ sequential vs ~20 ms pipelined (27-33x)**, identical site lists (91 / 1 / 158 si
 #### Automated Verification:
 - [x] rhs1 unit tests (130 passed incl. 9 new) and ruff clean; rh17m unit tests and ruff clean
 - [x] `rh17m bench pipeline`: same sites on 3 real towns
-- [ ] Full-record equivalence: 23 real states labelled with `RH17M_PIPELINE=0` vs `1`
-      (`rh17m bench compare-labels A B`): options, builds and every rollout net worth identical
+- [x] Full-record equivalence: **24/24 real states identical** labelled with `RH17M_PIPELINE=0` vs `1`
+      (`rh17m bench compare-labels A B`): options, builds, ladders and every rollout net worth. Median
+      build_s 38.8 -> 18.8 s (both arms running concurrently, 5 workers each, tracing off); total_s 103 -> 88 s.
+      `bridge_calls` is the same in both arms by design (pipelined requests still count)
 
 #### Manual Verification:
 - [ ] 25-min contended window: median build_s per state <= 20 s (from 60), states/h recorded
-- [ ] rhs1 PR opened (merge is the user's call)
+- [x] rhs1 PR opened: https://github.com/rachittshah/railhead-system1/pull/1 (merge is the user's call;
+      until then `RHS1_SRC=~/railhead-system1-batch/src scripts/launch.sh` uses the branch)
 
 ---
 
@@ -358,6 +361,7 @@ erasevolume APFS rh17m-tmp`, export `TMPDIR` for the label windows; detach in `s
 | phase | change | states/h | s/rollout | build_s | verdict |
 |---|---|---|---|---|---|
 | baseline | 22 workers, taskpolicy -a, uncompressed temp saves | 394 | 5.3 | 60 | - |
+| 2 (partial) | pipelined site search, 24 states, 2 x 5 workers | - | - | 38.8 -> 18.8 | build half: kept; remaining build time is server starts (fork per option) -> Phase 3 |
 
 ## Testing Strategy
 

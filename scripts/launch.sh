@@ -4,10 +4,22 @@
 set -u
 cd "${0:A:h}/.."
 S=rh17m
-R="taskpolicy -a .venv/bin/rh17m"  # app resource policy: P-cores (see src/rh17m/sched.py)
+# Opt-in variants, applied to every stage through its command prefix (no shared tmux environment needed):
+#   RHS1_SRC=~/railhead-system1-batch/src  rhs1 source with the pipelined site search (until its PR merges)
+#   ENGINE=m4lto                           data/engines/<name>/build/openttd (scripts/build_engine_variant.sh)
+PRE=""
+[[ -n ${RHS1_SRC:-} ]] && PRE+="PYTHONPATH=${RHS1_SRC:A} "
+if [[ -n ${ENGINE:-} ]]; then
+  [[ -x $PWD/data/engines/$ENGINE/build/openttd ]] || { echo "no engine variant $ENGINE"; exit 1; }
+  PRE+="RAILHEAD_OPENTTD=$PWD/data/engines/$ENGINE/build/openttd "
+fi
+R="${PRE}taskpolicy -a .venv/bin/rh17m"  # app resource policy: P-cores (see src/rh17m/sched.py)
 tmux has-session -t $S 2>/dev/null && { echo "session $S already running"; exit 1; }
 DEV=$(ls ~/railhead/tasks | grep -E '^arena-dev-02' | tr '\n' ' ')
 mkdir -p data/logs data/phoenix
+# say which rhs1 and engine the stages will use: a silent fallback to the sequential builder measures nothing
+echo "rhs1:   $(env ${=PRE} .venv/bin/python -c "import rhs1.builders.air as a; print(a.__file__, 'pipelined' if hasattr(a, '_dry_runs') else 'sequential')")"
+echo "engine: ${ENGINE:-stock}"
 loop() { echo "cd $PWD && while true; do $1; [ -f data/labels/.stop ] && break; sleep 120; done"; }
 # Trace viewer first (Arize Phoenix, `uv tool install arize-phoenix`): every stage exports OTLP spans to it
 # (src/rh17m/tracing.py); open http://127.0.0.1:6006 for the waterfalls. Stages started before it answers
@@ -24,7 +36,7 @@ tmux new-window -d -t $S -n harvest "cd $PWD && [ -f data/states/.harvest-done ]
 tmux new-window -d -t $S -n label-train "$(loop "RH17M_STAGE=label-train $R label --workers ${TRAIN_WORKERS:-11} --splits train --order-seed 3 >> data/logs/label-train.log 2>&1")"
 tmux new-window -d -t $S -n label-val "$(loop "RH17M_STAGE=label-val $R label --workers ${VAL_WORKERS:-8} --splits val --order-seed 2 >> data/logs/label-val.log 2>&1")"
 tmux new-window -d -t $S -n label-test "$(loop "RH17M_STAGE=label-test $R label --workers ${TEST_WORKERS:-3} --splits test,ood --order-seed 4 >> data/logs/label-test.log 2>&1")"
-[[ ${CLIMB:-1} == 1 ]] && tmux new-window -d -t $S -n climb "cd $PWD && scripts/climb_loop.sh"  # CLIMB=0: no GPU stage
+[[ ${CLIMB:-1} == 1 ]] && tmux new-window -d -t $S -n climb "cd $PWD && ${PRE}scripts/climb_loop.sh"  # CLIMB=0: no GPU stage
 tmux new-window -d -t $S -n watch "cd $PWD && $R watch --interval 120 >> data/logs/watch.log 2>&1"
 tmux new-window -d -t $S -n trackio "cd $PWD && .venv/bin/trackio show --project railhead-17m --no-footer >> data/logs/trackio.log 2>&1"
 tmux list-windows -t $S
