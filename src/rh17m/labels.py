@@ -197,6 +197,7 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
     meta = load_meta(root, state_id)
     task = TaskSpec.load(find_task(meta.task_id))
     t0 = time.perf_counter()
+    gs0 = tracing.bridge_totals()
     from rh17m.dataset import map_split
 
     split = map_split(meta.task_id)
@@ -206,7 +207,7 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
         tmp = Path(tmp)
         parent = World.load(tmp / "parent", Path(root) / f"{state_id}.sav")
         try:
-            with tracing.span("label.snapshot") as sp:
+            with tracing.span("label.snapshot", bridge=True) as sp:
                 snap = take_snapshot(querier_for(parent, task, meta.end_date))
                 routes = aggregate_routes(snap)
                 labels = {c["id"]: c["label"] for c in parent.call("cargos")}
@@ -224,7 +225,7 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
                     child = parent.fork(tmp / f"build{i}")
                     try:
                         try:
-                            with tracing.span("label.build_affordable"):
+                            with tracing.span("label.build_affordable", bridge=True):
                                 br, used = build_affordable(child, c.a["id"], c.b["id"])
                             builds[c.candidate_id] = {"ok": br.ok, "cost": br.cost, "failed_step": br.failed_step,
                                                       "airport_type": br.airport_type, "planes": used[1],
@@ -262,6 +263,7 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
         finally:
             parent.close()
         t_build = time.perf_counter() - t0
+        gs_calls, gs_ms = tracing.bridge_since(gs0)  # GameScript round trips of the build phase (not rollouts)
         options = [c.candidate_id for c in cands] + [e.key for e in exps] + [HOLD]
         if len(options) > 1 and len(aliases) == len(options) - 1:
             # Nothing could be built, so every option is the hold world: no signal, no rollouts.
@@ -269,7 +271,8 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
                     "nw0": nw0, "money0": money0, "rendered_state": rendered,
                     "candidates": [{**dataclasses.asdict(c), **extras.get(c.candidate_id, {})} for c in cands],
                     "expansions": as_dicts(exps), "options": options, "uninformative": "no_build",
-                    "builds": builds, "timing": {"build_s": round(t_build, 2), "total_s": round(t_build, 2)}}
+                    "builds": builds, "timing": {"build_s": round(t_build, 2), "total_s": round(t_build, 2),
+                                                  "bridge_calls": gs_calls, "bridge_ms": round(gs_ms, 1)}}
         # No need to simulate past the end of the game (horizon + run-off year), where the arena scores.
         left = meta.end_date + 365 - meta.date
         chunks = max(1, min(cfg.chunks, -(-left // cfg.chunk_days)))
@@ -286,7 +289,8 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
         "candidates": [{**dataclasses.asdict(c), **extras.get(c.candidate_id, {})} for c in cands],
         "expansions": as_dicts(exps), "options": options,
         "outcomes": outcomes,
-        "timing": {"build_s": round(t_build, 2), "total_s": round(time.perf_counter() - t0, 2)},
+        "timing": {"build_s": round(t_build, 2), "total_s": round(time.perf_counter() - t0, 2),
+                   "bridge_calls": gs_calls, "bridge_ms": round(gs_ms, 1)},
     }
 
 

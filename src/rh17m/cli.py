@@ -170,6 +170,7 @@ def _watch(a: argparse.Namespace) -> int:
     except ImportError:  # the local decision-mlx checkout predates them
         from rh17m._tracking import Tracker
 
+    from rh17m.bench import label_window, window_line
     from rh17m.dataset import DatasetConfig, load_examples
 
     tracker = Tracker("railhead-17m-data", name=time.strftime("pipeline-%m%d-%H%M"), system_interval=10.0)
@@ -186,6 +187,10 @@ def _watch(a: argparse.Namespace) -> int:
              "data/examples": len(exs)}
         for split in ("train", "val", "test", "ood"):
             m[f"data/examples_{split}"] = sum(e["split"] == split for e in exs)
+        win = label_window(labels, a.window_min)
+        print(window_line(win), flush=True)
+        m.update({f"data/window_{k}": win[k] for k in ("states_per_h", "build_s_median", "s_per_rollout_median",
+                                                      "bridge_calls_median") if win[k] is not None})
         tracker.log(m, step=step)
         if step % 5 == 0:  # the composition table every ~10 minutes
             by = Counter((e["split"], e["source"].split(":")[0]) for e in exs)
@@ -345,6 +350,7 @@ def main(argv: list[str] | None = None) -> int:
     wt.add_argument("--labels", default=str(DATA / "labels"))
     wt.add_argument("--states", default=str(DATA / "states"))
     wt.add_argument("--interval", type=int, default=120)
+    wt.add_argument("--window-min", type=float, default=25, help="window of the labelling-rate line and metrics")
     wt.set_defaults(fn=_watch)
 
     pr = sub.add_parser("play-report", help="paired closed-loop summary of every policy under runs/play")

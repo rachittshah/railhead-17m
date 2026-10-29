@@ -10,6 +10,11 @@ scripts/climb_loop.sh around a climb pass, see ``begin``/``end``).
 
 Simulator time is traced where it is spent: ``install()`` wraps railhead's World.load/fork/save/step/close
 and OpenTTDServer.start (railhead itself stays untouched), at package import like sched.py.
+
+GameScript round trips are counted separately from the spans (``count_calls``): every ``World.call`` adds one
+call and its wall time to a context-local running total, whether or not anything is traced. A span opened
+with ``bridge=True`` reports the difference over its lifetime as ``bridge_calls`` / ``bridge_ms``, and
+``bridge_totals`` / ``bridge_since`` give the same to code that records the numbers itself (label records).
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import socket
 import threading
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from urllib.parse import urlparse
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:6006"
@@ -49,6 +55,8 @@ class _NoSpan:
 
 
 NOOP = _NoSpan()
+
+_bridge: ContextVar[list] = ContextVar("rh17m_bridge")  # [round trips, seconds] since this context began
 
 
 def endpoint() -> str:
@@ -153,15 +161,65 @@ def _clean(attrs: dict) -> dict:
     return out
 
 
+def _running() -> list:
+    try:
+        return _bridge.get()
+    except LookupError:
+        acc = [0, 0.0]
+        _bridge.set(acc)
+        return acc
+
+
+def bridge_totals() -> tuple[int, float]:
+    """GameScript round trips and their wall seconds so far in this context (a running total: take
+    ``bridge_since`` of an earlier reading to measure a stretch of code)."""
+    calls, seconds = _running()
+    return calls, seconds
+
+
+def bridge_since(before: tuple[int, float]) -> tuple[int, float]:
+    """Round trips and milliseconds made since ``before`` (a ``bridge_totals`` reading)."""
+    calls, seconds = bridge_totals()
+    return calls - before[0], 1e3 * (seconds - before[1])
+
+
+def count_calls(owner: type, attr: str = "call") -> None:
+    """Count ``owner.attr`` (railhead's ``World.call``, the one door every builder, snapshot and step goes
+    through) as one GameScript round trip each, refusals included. Idempotent."""
+    fn = owner.__dict__[attr]
+    if getattr(fn, "_rh17m_counted", False):
+        return
+
+    @functools.wraps(fn)
+    def counted(*args, **kwargs):
+        t0 = time.perf_counter()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            acc = _running()
+            acc[0] += 1
+            acc[1] += time.perf_counter() - t0
+
+    counted._rh17m_counted = True
+    setattr(owner, attr, counted)
+
+
 @contextmanager
-def span(name: str, **attrs):
-    """A child of the current span; exceptions are recorded and mark it as an error."""
+def span(name: str, *, bridge: bool = False, **attrs):
+    """A child of the current span; exceptions are recorded and mark it as an error. ``bridge=True`` sets
+    ``bridge_calls`` and ``bridge_ms`` on it: the round trips made inside, nested spans' included."""
     t = _tracer()
     if t is None:
         yield NOOP
         return
     with t.start_as_current_span(name, attributes=_clean(attrs)) as s:
-        yield s
+        before = bridge_totals() if bridge else None
+        try:
+            yield s
+        finally:
+            if before is not None:
+                calls, ms = bridge_since(before)
+                s.set_attributes({"bridge_calls": calls, "bridge_ms": round(ms, 1)})
 
 
 def traced(name: str):
@@ -293,13 +351,16 @@ def _name(p) -> str:
 
 
 def install() -> None:
-    """Trace railhead's simulator calls (server start, load, fork, save, step, close) in this process."""
-    if os.environ.get("RH17M_TRACE", "1") == "0":
-        return
+    """Count railhead's GameScript round trips and trace its simulator calls (server start, load, fork, save,
+    step, close) in this process. Counting is two ``perf_counter`` reads on a ~1 ms call, so it stays on
+    with ``RH17M_TRACE=0``: label records report it either way."""
     from railhead import server as srv
     from railhead import world as wld
 
     W = wld.World
+    count_calls(W)
+    if os.environ.get("RH17M_TRACE", "1") == "0":
+        return
     wrap(srv.OpenTTDServer, "start", "server.start", lambda self: {"workdir": _name(self.workdir)})
     wrap(W, "load", "world.load", lambda cls, workdir, savegame, *a, **k: {"save": _name(savegame),
                                                                            "workdir": _name(workdir)})

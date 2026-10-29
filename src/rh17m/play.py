@@ -96,7 +96,7 @@ def play(task_id: str, policy: Policy, seed: int, wake_days: int = 90, max_air: 
                 for key in order[:max_tries]:
                     if key == HOLD:
                         break
-                    with tracing.span("play.build", option=key) as sp:
+                    with tracing.span("play.build", option=key, bridge=True) as sp:
                         r = apply_option(world, key, cands, exps)
                         sp.set_attributes({"kind": r["kind"], "ok": r["ok"], "cost": r["cost"] or 0})
                     rec["tries"].append({"key": key, "kind": r["kind"], "ok": r["ok"], "cost": r["cost"],

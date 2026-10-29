@@ -179,3 +179,78 @@ def test_unreachable_endpoint_is_probed_again_later(monkeypatch):
         pass
     assert len(probes) == 1
     tracing.reset()
+
+
+class CountedWorld:
+    """A World whose ``call`` takes ~2 ms, with railhead's refusal behaviour for one method."""
+
+    def call(self, method, **args):
+        time.sleep(0.002)
+        if method == "refused":
+            raise RuntimeError("ERR_NO_SITE")
+        return []
+
+
+@pytest.fixture
+def counted_world():
+    tracing.count_calls(CountedWorld)
+    return CountedWorld()
+
+
+def test_bridge_calls_attach_to_spans_without_double_counting(spans, counted_world):
+    w = counted_world
+    w.call("before")  # outside every span: nobody's
+    with tracing.span("outer", bridge=True):
+        w.call("a")
+        with tracing.span("inner", bridge=True):
+            for _ in range(3):
+                w.call("b")
+        w.call("c")
+    with tracing.span("sibling", bridge=True):
+        w.call("d")
+    with tracing.span("plain"):
+        w.call("e")
+    by = _by_name(spans)
+    outer, inner, sibling = (by[n][0].attributes for n in ("outer", "inner", "sibling"))
+    assert (outer["bridge_calls"], inner["bridge_calls"], sibling["bridge_calls"]) == (5, 3, 1)
+    assert inner["bridge_ms"] >= 6 and outer["bridge_ms"] >= inner["bridge_ms"] + 4
+    assert "bridge_calls" not in by["plain"][0].attributes  # opt-in per span
+
+
+def test_bridge_calls_count_refusals_and_survive_exceptions(spans, counted_world):
+    with pytest.raises(RuntimeError), tracing.span("build", bridge=True):
+        counted_world.call("ok")
+        counted_world.call("refused")  # a refused build step still costs a round trip
+    assert _by_name(spans)["build"][0].attributes["bridge_calls"] == 2
+
+
+def test_bridge_totals_work_without_a_tracer(monkeypatch, counted_world):
+    # The label record carries bridge_calls even with tracing off or no viewer listening.
+    monkeypatch.setenv("RH17M_TRACE", "0")
+    tracing.reset()
+    b0 = tracing.bridge_totals()
+    with tracing.span("x", bridge=True) as s:
+        counted_world.call("a")
+        counted_world.call("b")
+    assert s is tracing.NOOP
+    calls, ms = tracing.bridge_since(b0)
+    assert calls == 2 and ms >= 4
+
+
+def test_install_counts_world_calls_even_when_tracing_is_off(monkeypatch):
+    from railhead.world import World
+
+    monkeypatch.setenv("RH17M_TRACE", "0")
+    tracing.install()
+    tracing.install()  # idempotent: one round trip is counted once
+    assert getattr(World.call, "_rh17m_counted", False)
+
+    class FakeBridge:
+        def call(self, method, timeout=30.0, **args):
+            return method
+
+    w = World.__new__(World)
+    w.bridge = FakeBridge()
+    b0 = tracing.bridge_totals()
+    assert w.call("state") == "state"
+    assert tracing.bridge_since(b0)[0] == 1
