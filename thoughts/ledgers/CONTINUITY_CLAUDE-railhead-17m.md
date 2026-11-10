@@ -141,6 +141,9 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
     23 min); search:3 on devhub 12.5 min per model. One game per train map (88 maps: 61 one-year, 16
     five-year, 11 ten-year) is 590 decisions, so a first round of 5 passes is about 3,000 decisions:
     data 3.3 h + 3 seeds 0.8 h + evaluation 2.5 h, about 7 h. Each further 1,000 decisions: 67 min.
+    Savings measured on disk the same day: 2,045 of 6,763 oracle options (30%) failed to build with zero
+    spend, so a pre-fork filter is worth trying; pruning to the top half of options after 182 days keeps
+    the final best in only 61% of 1,341 lbl-v4 states (unsafe), after 364 days in 92% (mean regret 0.008).
     Vast.ai live offers that day: USD 0.005-0.012 per CPU thread-hour (64 threads 0.32-0.67/h, 128 threads
     0.80-1.00/h); thread speed vs an M4 worker assumed 0.2-0.3, UNCONFIRMED (run `rh17m bench` there).
 - Next: fix the evaluation (cluster bootstrap by map, gate off the test maps, run-off from the task, label
