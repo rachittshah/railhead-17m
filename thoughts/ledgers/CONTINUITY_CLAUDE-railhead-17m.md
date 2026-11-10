@@ -130,9 +130,18 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
         oracle gain 0.65 at 3.8 options/decision; control 0.57; search:2 0.48; model alone 0.19.
         search:3 vs control +0.077 [-0.147,+0.243], 19/26 maps -> the lookahead does most of the work,
         the model is a weak prior.
-- Now: [→] expert iteration: train on the oracle and search decisions (about 1,300 decisions with simulated
-  values, under a good policy's states), then re-run search:3 vs its control: the model's edge over random
-  candidates is the number to move.
+- Now: [→] expert iteration: run the oracle and search policies on the TRAIN maps, train on those decisions,
+  then re-run search:3 vs its control: the model's edge over random candidates is the number to move.
+  - CORRECTION 2026-11-10: the ~1,300 oracle/search decisions already on disk are all on `-dev-` maps
+    (map_split = test, and the closed-loop suites play those maps). Do NOT train on them.
+  - `rh17m play` keeps each option's value per decision but not the observation text or a savegame, so
+    turning a played decision into a training example needs a small converter (code, no compute).
+  - Compute estimate (measured 2026-11-10, M4 Max, 8 games at once, pipelined builder): 31.4 worker-s per
+    oracle decision = 896 decisions/h; training 0.028 s per example-epoch (6,100 examples x 8 epochs =
+    23 min); search:3 on devhub 12.5 min per model. 5,000 new decisions: data 5.6 h + 3 seeds 1.1 h +
+    evaluation 2.5 h, about 9 h. About 930 decisions per pass over the train maps, so 5,000 is 5 passes.
+    Vast.ai live offers that day: USD 0.005-0.012 per CPU thread-hour (64 threads 0.32-0.67/h, 128 threads
+    0.80-1.00/h); thread speed vs an M4 worker assumed 0.2-0.3, UNCONFIRMED (run `rh17m bench` there).
 - Next: fix the evaluation (cluster bootstrap by map, gate off the test maps, run-off from the task, label
   version filter) before any further climb pass; then expert iteration (distil the search back into the
   model); widen the action space (loan, wake cadence); HF publish still needs `hf auth login`.

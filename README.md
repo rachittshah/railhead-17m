@@ -69,8 +69,10 @@ model's.
 Three simulated options recover about two thirds of the oracle's gain at about a third of its cost. Most of
 that comes from the lookahead, not from the model: with the model choosing the candidates the gain over the
 random control is +0.077 [-0.147, +0.243], 19 of 26 maps won. So the simulator is where the value is today,
-and the model is a weak prior. The oracle and search games are also 1,300 new decisions labelled under a good
-policy's state distribution, which is the data the next training round needs.
+and the model is a weak prior. The oracle and search games also valued about 1,300 decisions under a good
+policy's state distribution. They cannot be trained on: every one sits on a dev map, which `map_split` calls
+`test` and which the closed-loop suites play. The next training round needs the same policies run on the
+training maps.
 
 **Offline**, simulator-valued decisions (asinh units; 0.1 is about 10% of net worth at the horizon):
 
