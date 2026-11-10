@@ -1,0 +1,205 @@
+{
+ "maps": 26,
+ "games_per_label": 52,
+ "seeds": [
+  1,
+  2
+ ],
+ "tasks": [
+  "arena-dev-0000",
+  "arena-dev-0001",
+  "arena-dev-0003",
+  "arena-dev-0005",
+  "arena-dev-0007",
+  "arena-dev-0008",
+  "arena-dev-0009",
+  "arena-dev-0010",
+  "arena-dev-0011",
+  "arena-dev-0013",
+  "arena-dev-0014",
+  "arena-dev-0017",
+  "arena-dev-0018",
+  "arena-dev-0019",
+  "tycoon-dev-0022",
+  "tycoon-dev-0030",
+  "tycoon-dev-0034",
+  "tycoon-dev-0035",
+  "tycoon-dev-0037",
+  "tycoon-dev-0051",
+  "tycoon-dev-0054",
+  "tycoon-dev-0057",
+  "tycoon-dev-0077",
+  "tycoon-dev-0080",
+  "tycoon-dev-0089",
+  "tycoon-dev-0092"
+ ],
+ "unpaired": {},
+ "policies": {
+  "oracle": {
+   "mean_asinh_nw": 2.8916,
+   "mean_score": 0.7822,
+   "median_nw": 1126158,
+   "games": 52,
+   "players": [
+    "play-v3"
+   ],
+   "wake_days": [
+    180
+   ],
+   "vs": {
+    "random": {
+     "diff": 0.9185,
+     "ci95": [
+      0.6039,
+      1.2129
+     ]
+    },
+    "longest": {
+     "diff": 1.0159,
+     "ci95": [
+      0.6757,
+      1.3324
+     ]
+    },
+    "model:1023-1627-base-s1": {
+     "diff": 0.7474,
+     "ci95": [
+      0.4518,
+      1.0818
+     ]
+    }
+   },
+   "decisions": {
+    "decisions": 373,
+    "best_minus_mean": {
+     "mean": 0.2504,
+     "median": 0.1578,
+     "p90": 0.654
+    },
+    "best_minus_hold": {
+     "mean": 0.31,
+     "median": 0.1204
+    },
+    "best_is": {
+     "hold": 0.1528,
+     "expand": 0.37,
+     "route": 0.4772
+    },
+    "played_built": 0.7668,
+    "uninformative": 7,
+    "played_best": 1.0,
+    "second_tries": 0,
+    "fork_vs_live": {
+     "tries_checked": 316,
+     "mismatched": 0
+    }
+   }
+  },
+  "random": {
+   "mean_asinh_nw": 1.9731,
+   "mean_score": 0.5938,
+   "median_nw": 441479,
+   "games": 52,
+   "players": [
+    "play-v3"
+   ],
+   "wake_days": [
+    180
+   ],
+   "vs": {
+    "oracle": {
+     "diff": -0.9185,
+     "ci95": [
+      -1.2129,
+      -0.6039
+     ]
+    },
+    "longest": {
+     "diff": 0.0975,
+     "ci95": [
+      -0.0903,
+      0.2894
+     ]
+    },
+    "model:1023-1627-base-s1": {
+     "diff": -0.171,
+     "ci95": [
+      -0.5294,
+      0.2307
+     ]
+    }
+   }
+  },
+  "longest": {
+   "mean_asinh_nw": 1.8756,
+   "mean_score": 0.5902,
+   "median_nw": 410425,
+   "games": 52,
+   "players": [
+    "play-v3"
+   ],
+   "wake_days": [
+    180
+   ],
+   "vs": {
+    "oracle": {
+     "diff": -1.0159,
+     "ci95": [
+      -1.3324,
+      -0.6757
+     ]
+    },
+    "random": {
+     "diff": -0.0975,
+     "ci95": [
+      -0.2894,
+      0.0903
+     ]
+    },
+    "model:1023-1627-base-s1": {
+     "diff": -0.2685,
+     "ci95": [
+      -0.6142,
+      0.1203
+     ]
+    }
+   }
+  },
+  "model:1023-1627-base-s1": {
+   "mean_asinh_nw": 2.1441,
+   "mean_score": 0.6396,
+   "median_nw": 508530,
+   "games": 52,
+   "players": [
+    "play-v3"
+   ],
+   "wake_days": [
+    180
+   ],
+   "vs": {
+    "oracle": {
+     "diff": -0.7474,
+     "ci95": [
+      -1.0818,
+      -0.4518
+     ]
+    },
+    "random": {
+     "diff": 0.171,
+     "ci95": [
+      -0.2307,
+      0.5294
+     ]
+    },
+    "longest": {
+     "diff": 0.2685,
+     "ci95": [
+      -0.1203,
+      0.6142
+     ]
+    }
+   }
+  }
+ },
+ "warnings": []
+}

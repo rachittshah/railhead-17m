@@ -28,6 +28,28 @@ and vs longest +0.269 [-0.120, +0.614]. Neither is significant. The closed-loop 
 rejected both distilled candidates against the incumbent: self-distilled -0.405 [-0.787, -0.036] and
 ensemble-distilled -0.440 [-0.836, -0.074]. Distillation improved val regret but hurt closed-loop play.
 
+**The ceiling** (2026-11-10, `runs/play-oracle-devhub/summary.json`, same 26 maps, same 2 seeds, paired). The
+`oracle` policy values every option with the simulator at each wake-up (one rollout seed, 728 days) and plays
+the best one. It is a lower bound on what this action space allows.
+
+| policy | mean asinh(net worth / £100k) | median net worth | vs random [95% interval, maps resampled] | maps won vs random |
+|---|---|---|---|---|
+| oracle | 2.892 | £1,126,158 | +0.918 [+0.604, +1.213] | 25 of 26 |
+| railhead-17m | 2.144 | £508,530 | +0.171 [-0.231, +0.529] | 19 of 26 |
+| random option | 1.973 | £441,479 | | |
+| always longest route | 1.876 | £410,425 | -0.098 [-0.289, +0.090] | |
+
+The oracle beats the model by +0.747 [+0.452, +1.082] and wins 24 of 26 maps. The model captures 19% of the
+oracle's gain over random, which agrees with the offline `capture` of about 0.2. So the labels and the action
+space carry value that the evaluation can see, and the model is the bottleneck. Over 373 oracle decisions the
+best option is a new route in 48%, more planes in 37% and hold in 15%; the fork predicted the live build in
+316 of 316 checks.
+
+One map, one seed, for scale against the frontier models: on `arena-dev-0100` (Railhead's Arena 2 world) the
+model ends at £10.4M, random at £7.1M and always-longest at £7.3M (`runs/play-arena0100/`). Claude Opus 5.5
+reached £45.8M on that map by laying every tile itself; the policies here choose from a menu and a scripted
+builder places the airports, so the two are not like for like.
+
 **Offline**, simulator-valued decisions (asinh units; 0.1 is about 10% of net worth at the horizon):
 
 | split | n | model regret | model play_regret | longest regret | longest play_regret | uniform play_regret |

@@ -116,9 +116,19 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
   the closed-loop gate runs on Hub dev maps, which map_split calls `test`; tycoon labels value at 365 run-off
   days where the tasks say 730 (79 states); seven label versions are mixed with no version filter (1,561 of
   2,618 are lbl-v4). No closed-loop oracle (always pick the simulator-best option) has ever been run.
-- Next: closed-loop oracle ceiling first (about 1.5 h; decides imitate vs widen the action space: loan,
-  wake cadence); then fix the evaluation (cluster bootstrap by map, gate off the test maps) before any
-  further climb pass; HF publish still needs `hf auth login`.
+  - [x] ORACLE CEILING 2026-11-10 (src/rh17m/oracle.py, `rh17m play --policies oracle`, `rh17m play-report`):
+        26 devhub maps x 2 seeds, paired, map bootstrap: oracle vs random +0.918 [+0.604,+1.213] (25/26 maps),
+        vs model +0.747 [+0.452,+1.082] (24/26); model vs random +0.171 (n.s.) = 19% of the oracle's gain.
+        -> the labels and action space carry value; the MODEL is the bottleneck; the eval resolves this size.
+        Oracle decisions (373): best = route 48%, expand 37%, hold 15%; fork vs live build 316/316 equal.
+        arena-dev-0100, 1 seed: model GBP 10.38M, random 7.09M, longest 7.33M (runs/play-arena0100).
+  - Branches: audit/2026-11-10-fixes (PR #1 -> main), oracle/closed-loop-ceiling (PR #2 -> audit). The
+    checkout is on the oracle branch.
+- Now: [→] local-suite oracle (11 ten-year maps, runs/play-oracle-local); model + k-option lookahead
+  (search at decision time) as the next experiment.
+- Next: fix the evaluation (cluster bootstrap by map, gate off the test maps, run-off from the task, label
+  version filter) before any further climb pass; then expert iteration (distil the search back into the
+  model); widen the action space (loan, wake cadence); HF publish still needs `hf auth login`.
 
 ## Open questions
 - UNCONFIRMED: HF write token (user must run `hf auth login`).
