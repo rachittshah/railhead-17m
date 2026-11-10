@@ -123,7 +123,9 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
         Oracle decisions (373): best = route 48%, expand 37%, hold 15%; fork vs live build 316/316 equal.
         arena-dev-0100, 1 seed: model GBP 10.38M, random 7.09M, longest 7.33M (runs/play-arena0100).
   - Branches: audit/2026-11-10-fixes (PR #1 -> main), oracle/closed-loop-ceiling (PR #2 -> audit). The
-    checkout is on the oracle branch.
+    checkout is on the oracle branch. FINAL PR #3 = oracle/closed-loop-ceiling -> main (#1 + #2 in one).
+    Merge order across repos: railhead-system1 #4, railhead #7, then this #3. Tests pass against both
+    of those stacks (153 unit, plus the real-engine label test with the pipelined builder).
   - [x] Local suite, 11 ten-year maps x 1 seed: oracle vs random +1.277 [+0.547,+2.462], vs model +1.291.
   - [x] SEARCH (src/rh17m/search.py; `search:<k>` = model's top k + hold simulated with the oracle's code;
         `search:<k>:random` = control). Devhub 26x2: search:3 vs random +0.598 [+0.290,+0.899], share of
