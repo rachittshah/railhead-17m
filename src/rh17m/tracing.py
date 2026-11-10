@@ -394,6 +394,8 @@ def install() -> None:
 
     W = wld.World
     count_calls(W)
+    if hasattr(W, "call_args"):  # hardened railhead routes step and act through call_args, not call
+        count_calls(W, "call_args")
     count_starts(srv.OpenTTDServer)
     if os.environ.get("RH17M_TRACE", "1") == "0":
         return

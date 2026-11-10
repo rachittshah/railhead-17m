@@ -249,11 +249,18 @@ def test_install_counts_world_calls_even_when_tracing_is_off(monkeypatch):
         def call(self, method, timeout=30.0, **args):
             return method
 
+        def request(self, method, args=None, timeout=30.0):  # railhead's hardened Bridge: arguments as one dict
+            return method
+
     w = World.__new__(World)
     w.bridge = FakeBridge()
     b0 = tracing.bridge_totals()
     assert w.call("state") == "state"
     assert tracing.bridge_since(b0)[0] == 1
+    if hasattr(World, "call_args"):  # hardened railhead: step and act go through call_args, counted too
+        assert getattr(World.call_args, "_rh17m_counted", False)
+        assert w.call_args("state", {}) == "state"
+        assert tracing.bridge_since(b0)[0] == 2
 
 
 class StartableServer:
