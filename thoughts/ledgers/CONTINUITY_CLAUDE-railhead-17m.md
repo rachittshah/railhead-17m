@@ -102,9 +102,23 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
 - PAUSED 2026-10-24 ~10:15 at user request (fans/CPU): everything stopped via scripts/stop.sh. 2,618 labelled
   states. Incumbent restored to 1023-1627-base-s1 (two aborted passes had overwritten it). Climb passes 10/11
   were aborted (tmux killed by an orphan sweep at 09:20; GPU run stopped by user) -> never pkill ad hoc.
-- Next: CPU hyperoptimisation plan `thoughts/shared/plans/2026-10-29-cpu-hyperoptimize.md` (Phase 0
-  instrumentation first: bridge-call count per build decides Phase 2 vs 3 order); resume climb; judge
-  candidates in closed loop; HF publish needs `hf auth login`.
+- PERF WORK 2026-10-29 (plan `thoughts/shared/plans/2026-10-29-cpu-hyperoptimize.md`; pipeline stayed paused):
+  - [x] Phase 0 instrumentation (dfc9a1b): 1,269 bridge calls per option -> Phase 2 first
+  - [x] Phase 2 pipelined site search (614b67c; rhs1 PR #1 still open): build_s 38.8 -> 18.8, 24/24 labels equal
+  - [x] Phase 3 server pool code, opt-in RH17M_POOL=1 (d3da588, 614b13b). Reload correctness boxes in the
+        plan are unticked; no label in data/ was made with the pool
+  - [x] Phase 4 partly: GATE_WORKERS 8 / DAGGER_WORKERS 6 (4b7f254), sweep scripts (70d3cfd, 65c71a1)
+  - Sweep, 14 workers, 1-seed jobs, 10-min windows (runs/sweep): 906 states/h base stack vs 1,650/h with
+    pool + pipelined rhs1 + the pr-check engine. Launch defaults were NOT changed (still 22 workers, POOL=0).
+  - Engine variant (flags + stdin poll, railhead PR #3): 11% faster uncontended; no keep/drop verdict recorded
+- AUDIT 2026-11-10 (findings, nothing re-run): the climb keep test resamples single decisions although val is
+  398 examples from 10 maps (three maps hold 373), and val also picks the epoch and fits the temperature;
+  the closed-loop gate runs on Hub dev maps, which map_split calls `test`; tycoon labels value at 365 run-off
+  days where the tasks say 730 (79 states); seven label versions are mixed with no version filter (1,561 of
+  2,618 are lbl-v4). No closed-loop oracle (always pick the simulator-best option) has ever been run.
+- Next: closed-loop oracle ceiling first (about 1.5 h; decides imitate vs widen the action space: loan,
+  wake cadence); then fix the evaluation (cluster bootstrap by map, gate off the test maps) before any
+  further climb pass; HF publish still needs `hf auth login`.
 
 ## Open questions
 - UNCONFIRMED: HF write token (user must run `hf auth login`).

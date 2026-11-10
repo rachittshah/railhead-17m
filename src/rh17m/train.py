@@ -69,7 +69,8 @@ _ENC_CACHE: dict[tuple, B.EncodedDecision] = {}
 
 
 def _encoded(tok, ex: dict, layout: str) -> B.EncodedDecision:
-    key = (id(tok), ex["id"], layout, hash(ex["state_json"]), hash(tuple(ex["options"])))
+    # The fingerprint (tokenizer file + limits), not id(tok): every model load builds a new tokenizer object.
+    key = (tok.fingerprint, ex["id"], layout, hash(ex["state_json"]), hash(tuple(ex["options"])))
     enc = _ENC_CACHE.get(key)
     if enc is None:
         enc = _ENC_CACHE[key] = B.encode_choice(tok, ex["state_json"], ex["instructions"], ex["options"],

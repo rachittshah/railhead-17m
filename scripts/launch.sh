@@ -6,7 +6,6 @@ cd "${0:A:h}/.."
 S=rh17m
 source "${0:A:h}/stack_env.sh"  # RHS1_SRC / ENGINE / POOL opt-ins -> PRE, POOLPRE, R
 tmux has-session -t $S 2>/dev/null && { echo "session $S already running"; exit 1; }
-DEV=$(ls ~/railhead/tasks | grep -E '^arena-dev-02' | tr '\n' ' ')
 mkdir -p data/logs data/phoenix
 loop() { echo "cd $PWD && while true; do $1; [ -f data/labels/.stop ] && break; sleep 120; done"; }
 # Trace viewer first (Arize Phoenix, `uv tool install arize-phoenix`): every stage exports OTLP spans to it

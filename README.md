@@ -22,6 +22,12 @@ days, player `play-v3` (falls back to the next option when a build fails without
 | always longest route | 0.665 | 3.656 | 6/11 |
 | hold (do nothing) | 0.000 | | |
 
+Second closed-loop suite (2026-10-23, `runs/play-devhub/summary.json`: 26 Hub dev maps of 256x256, 14 with a
+5-year mandate and 12 with a 1-year mandate, 2 seeds each, paired bootstrap on asinh net worth): the incumbent vs random is +0.171 [-0.231, +0.529],
+and vs longest +0.269 [-0.120, +0.614]. Neither is significant. The closed-loop gate (`runs/climb/gates.jsonl`)
+rejected both distilled candidates against the incumbent: self-distilled -0.405 [-0.787, -0.036] and
+ensemble-distilled -0.440 [-0.836, -0.074]. Distillation improved val regret but hurt closed-loop play.
+
 **Offline**, simulator-valued decisions (asinh units; 0.1 is about 10% of net worth at the horizon):
 
 | split | n | model regret | model play_regret | longest regret | longest play_regret | uniform play_regret |
@@ -31,9 +37,12 @@ days, player `play-v3` (falls back to the next option when a build fails without
 
 `play_regret` replays the closed-loop player offline (options in the model's order, skipping builds that
 failed). Hillclimbing (`runs/climb/ledger.jsonl`) uses seed-matched 3-seed comparisons with an A/A control per
-pass; it has kept no move beyond noise at this data size (≈800 decisions); data and the action space
-(expansions, continuation policy) have moved results, not settings. Next: `lbl-v4` labels (rollouts keep
-adding planes after the option), ensemble distillation, DAgger.
+pass. At this data size (≈800 decisions) no setting change has survived. Four moves passed the offline bar
+(tau 0.1, self-distillation, `expansions: false`, `freeze_embeddings`), and all four were reverted: the
+closed-loop gate rejected distillation, and pass 8's keeps were a val-definition artifact. Data and the action
+space (expansions, continuation policy) have moved results; settings have not. Status as of 2026-10-24:
+`lbl-v4` labels (rollouts keep adding planes after the option) and DAgger are part of the pipeline, and
+distillation is moved last behind the closed-loop gate. The pipeline has been paused since 2026-10-24.
 
 ## How the labels are made
 
@@ -52,7 +61,9 @@ decision state (savegame)                       options: 8 air candidates (route
   and scripted self-play (random / longest / mixed policies) on 25 local 512x512 maps and 151 Hub maps.
 - **Splits by map**: `arena-dev-*` = test, `arena-train-0227/0228/0229` = val, other train maps = train.
 - **Throughput** (M4 Max): fork 0.7 s, a 365-day step 1.0 s on a fresh map and 1.8 s at 148 vehicles;
-  ~150-190 s per labelled state with 8 workers in parallel.
+  394 labelled states/h with 22 workers (2026-10-24: mixed 1-seed train and 3-seed eval jobs). 10-minute
+  windows on 2026-10-29 (`runs/sweep/*.jsonl`, 14 workers, 1-seed jobs only) gave 906/h on the stock path and
+  1,650/h with the opt-in server pool and pipelined site search.
 
 ## The model
 
