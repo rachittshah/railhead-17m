@@ -145,10 +145,15 @@ def play(task_id: str, policy: Policy, seed: int, wake_days: int = 90, max_air: 
 
 
 def game_path(out_dir: Path, policy_name: str, task_id: str, seed: int, wake_days: int,
-              max_wakes: int | None = None) -> Path:
+              max_wakes: int | None = None, model_dir: str | None = None) -> Path:
     """Where a game's record lives, which is also its cache key. The oracle's name carries every setting its
     result depends on (wake interval, player, label version and config, simulator stack: ``oracle.game_key``),
-    so a game played under other settings is never reused; other policies keep their historical names."""
+    so a game played under other settings is never reused; ``search:`` names add k, source and model
+    (``search.game_key``); other policies keep their historical names."""
+    if policy_name.startswith("search:"):
+        from rh17m.search import game_path as search_path
+
+        return search_path(out_dir, policy_name, task_id, seed, wake_days, max_wakes, model_dir)
     if policy_name != "oracle":
         return Path(out_dir) / f"{policy_name}.{task_id}.s{seed}.json"
     from rh17m.oracle import game_key, key_tag
@@ -161,7 +166,7 @@ def _job(args: tuple) -> dict:
     # rest: the caller's traceparent, then max_wakes
     task_id, policy_name, seed, wake_days, out_dir, model_dir, *rest = args
     max_wakes = rest[1] if len(rest) > 1 else None
-    dest = game_path(Path(out_dir), policy_name, task_id, seed, wake_days, max_wakes)
+    dest = game_path(Path(out_dir), policy_name, task_id, seed, wake_days, max_wakes, model_dir)
     if dest.exists():
         res = json.loads(dest.read_text())
         if policy_name == "oracle":
@@ -170,13 +175,21 @@ def _job(args: tuple) -> dict:
             stale = {k: (res.get(k), v) for k, v in game_key(wake_days).items() if res.get(k) != v}
             if stale:
                 raise RuntimeError(f"{dest} does not match this run's settings: {stale}")
+        elif policy_name.startswith("search:"):
+            from rh17m.search import game_key as search_key
+            from rh17m.search import parse_name
+
+            want = search_key(wake_days, *parse_name(policy_name), model_dir)
+            stale = {k: (res.get(k), v) for k, v in want.items() if res.get(k) != v}
+            if stale:
+                raise RuntimeError(f"{dest} does not match this run's settings: {stale}")
         return res
     try:
         with tracing.attach(rest[0] if rest else ""), tracing.span(
                 "play.game", task=task_id, policy=policy_name, seed=seed, wake_days=wake_days,
                 model=model_dir or "") as sp:
             policy = make_policy(policy_name, model_dir)
-            if policy_name == "oracle":
+            if policy_name == "oracle" or policy_name.startswith("search:"):
                 from rh17m.labels import fast_saves
 
                 try:  # one failed oracle game (hours of work for the others in flight) must not stop the run
@@ -211,6 +224,10 @@ def make_policy(name: str, model_dir: str | None = None) -> Policy:
         from rh17m.oracle import OraclePolicy
 
         return OraclePolicy()
+    if name.startswith("search:"):  # model prior + simulator on its top k (rh17m.search)
+        from rh17m.search import make_search
+
+        return make_search(name, model_dir)
     if name == "model":
         from rh17m.policy import ModelPolicy
 
@@ -394,6 +411,12 @@ def compare(run_dirs: list[Path], refs: list[str] | None = None, labels: list[st
                 row["vs"][ref] = {"diff": round(d, 4), "ci95": [round(lo, 4), round(hi, 4)]}
         if lab == "oracle":
             row["decisions"] = oracle_decisions(rs)
+        if "oracle" in games and "random" in games and len(tasks) > 1:  # rh17m.search: what a label recovers
+            from rh17m.search import decision_cost, oracle_share
+
+            row["cost"] = decision_cost(rs)
+            if lab not in ("oracle", "random"):
+                row["oracle_share"] = oracle_share(per_map[lab], per_map["oracle"], per_map["random"], n=n_boot)
         out["policies"][lab] = row
     if len({tuple(r["players"]) for r in out["policies"].values()}) > 1:
         out["warnings"].append("labels were played by different player versions")
@@ -415,6 +438,18 @@ def format_compare(out: dict) -> str:
             x = v["vs"].get(r)
             cells.append(f"{x['diff']:+.3f} [{x['ci95'][0]:+.3f},{x['ci95'][1]:+.3f}]" if x else "-")
         lines.append(" | ".join(cells))
+    if any("oracle_share" in v for v in pol.values()):
+        lines.append("share of oracle gain = (label - random) / (oracle - random) on per-map asinh_nw [95% map "
+                     "bootstrap]; cost = options simulated and policy seconds per decision")
+        for lab, v in sorted(pol.items(), key=lambda kv: -(kv[1]["mean_asinh_nw"] or 0)):
+            s, c = v.get("oracle_share"), v.get("cost") or {}
+            share = ("-" if not s else "n/a (oracle gain ~0)" if s["share"] is None else
+                     f"{s['share']:+.3f} [{s['ci95'][0]:+.3f},{s['ci95'][1]:+.3f}]" if s["ci95"] else f"{s['share']:+.3f}")
+            if s and s["degenerate"]:
+                share += f" ({s['degenerate']}/{s['resamples']} resamples with no oracle gain left out)"
+            opts = "-" if c.get("options_per_decision") is None else f"{c['options_per_decision']:.2f}"
+            secs = "-" if c.get("s_per_decision") is None else f"{c['s_per_decision']:.2f}s"
+            lines.append(f"  {lab}: share {share} | options/decision {opts} | {secs}/decision")
     dec = pol.get("oracle", {}).get("decisions")
     if dec:
         lines.append(f"oracle decisions: {json.dumps(dec)}")

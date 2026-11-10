@@ -50,6 +50,28 @@ model ends at £10.4M, random at £7.1M and always-longest at £7.3M (`runs/play
 reached £45.8M on that map by laying every tile itself; the policies here choose from a menu and a scripted
 builder places the airports, so the two are not like for like.
 
+The 11 local ten-year maps, one seed (`runs/play-oracle-local/summary.json`), agree: oracle vs random +1.277
+[+0.547, +2.462], oracle vs model +1.291 [+0.506, +2.490]; median net worth £15.2M, £5.3M and £8.0M.
+
+**Search at decision time** (2026-11-10, `runs/play-search-devhub/compare.json`, the same 26 maps and seeds).
+`search:k` lets the model rank the options, simulates only its top k (plus hold) with the oracle's own
+valuation, and plays the best of those. `search:k:random` is the control: k random options instead of the
+model's.
+
+| policy | vs random [95% interval] | share of the oracle's gain | options simulated per decision | seconds per decision |
+|---|---|---|---|---|
+| oracle | +0.918 [+0.604, +1.213] | 1 | 10.8 | 30.0 |
+| search:3 (model's top 3) | +0.598 [+0.290, +0.899] | 0.65 [0.45, 0.79] | 3.8 | 10.8 |
+| search:3:random (control) | +0.521 [+0.318, +0.754] | 0.57 [0.41, 0.76] | 3.7 | 8.7 |
+| search:2 (model's top 2) | +0.440 [+0.203, +0.694] | 0.48 [0.30, 0.62] | 2.9 | 7.1 |
+| railhead-17m alone | +0.171 [-0.231, +0.529] | 0.19 [-0.31, 0.48] | 0 | 0.3 |
+
+Three simulated options recover about two thirds of the oracle's gain at about a third of its cost. Most of
+that comes from the lookahead, not from the model: with the model choosing the candidates the gain over the
+random control is +0.077 [-0.147, +0.243], 19 of 26 maps won. So the simulator is where the value is today,
+and the model is a weak prior. The oracle and search games are also 1,300 new decisions labelled under a good
+policy's state distribution, which is the data the next training round needs.
+
 **Offline**, simulator-valued decisions (asinh units; 0.1 is about 10% of net worth at the horizon):
 
 | split | n | model regret | model play_regret | longest regret | longest play_regret | uniform play_regret |

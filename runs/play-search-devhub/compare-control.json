@@ -1,0 +1,241 @@
+{
+ "maps": 26,
+ "games_per_label": 52,
+ "seeds": [
+  1,
+  2
+ ],
+ "tasks": [
+  "arena-dev-0000",
+  "arena-dev-0001",
+  "arena-dev-0003",
+  "arena-dev-0005",
+  "arena-dev-0007",
+  "arena-dev-0008",
+  "arena-dev-0009",
+  "arena-dev-0010",
+  "arena-dev-0011",
+  "arena-dev-0013",
+  "arena-dev-0014",
+  "arena-dev-0017",
+  "arena-dev-0018",
+  "arena-dev-0019",
+  "tycoon-dev-0022",
+  "tycoon-dev-0030",
+  "tycoon-dev-0034",
+  "tycoon-dev-0035",
+  "tycoon-dev-0037",
+  "tycoon-dev-0051",
+  "tycoon-dev-0054",
+  "tycoon-dev-0057",
+  "tycoon-dev-0077",
+  "tycoon-dev-0080",
+  "tycoon-dev-0089",
+  "tycoon-dev-0092"
+ ],
+ "unpaired": {},
+ "policies": {
+  "search:3": {
+   "mean_asinh_nw": 2.5708,
+   "mean_score": 0.7243,
+   "median_nw": 744954,
+   "games": 52,
+   "players": [
+    "play-v3"
+   ],
+   "wake_days": [
+    180
+   ],
+   "vs": {
+    "search:3:random": {
+     "diff": 0.0768,
+     "ci95": [
+      -0.1467,
+      0.2435
+     ]
+    },
+    "search:2": {
+     "diff": 0.1573,
+     "ci95": [
+      0.0255,
+      0.2731
+     ]
+    }
+   },
+   "cost": {
+    "options_per_decision": 3.839,
+    "s_per_decision": 10.815
+   },
+   "oracle_share": {
+    "share": 0.6507344742217755,
+    "ci95": [
+     0.44733553064721987,
+     0.7877860137729159
+    ],
+    "degenerate": 0,
+    "negative_gain": 0,
+    "resamples": 2000
+   }
+  },
+  "search:3:random": {
+   "mean_asinh_nw": 2.494,
+   "mean_score": 0.7003,
+   "median_nw": 691036,
+   "games": 52,
+   "players": [
+    "play-v3"
+   ],
+   "wake_days": [
+    180
+   ],
+   "vs": {
+    "search:2": {
+     "diff": 0.0805,
+     "ci95": [
+      -0.0445,
+      0.2142
+     ]
+    }
+   },
+   "cost": {
+    "options_per_decision": 3.671,
+    "s_per_decision": 8.648
+   },
+   "oracle_share": {
+    "share": 0.5671600227562972,
+    "ci95": [
+     0.41334704303815656,
+     0.7630128417429285
+    ],
+    "degenerate": 0,
+    "negative_gain": 0,
+    "resamples": 2000
+   }
+  },
+  "search:2": {
+   "mean_asinh_nw": 2.4135,
+   "mean_score": 0.6874,
+   "median_nw": 645940,
+   "games": 52,
+   "players": [
+    "play-v3"
+   ],
+   "wake_days": [
+    180
+   ],
+   "vs": {
+    "search:3:random": {
+     "diff": -0.0805,
+     "ci95": [
+      -0.2142,
+      0.0445
+     ]
+    }
+   },
+   "cost": {
+    "options_per_decision": 2.905,
+    "s_per_decision": 7.094
+   },
+   "oracle_share": {
+    "share": 0.4794697066998241,
+    "ci95": [
+     0.30214500851592596,
+     0.62338208323624
+    ],
+    "degenerate": 0,
+    "negative_gain": 0,
+    "resamples": 2000
+   }
+  },
+  "oracle": {
+   "mean_asinh_nw": 2.8916,
+   "mean_score": 0.7822,
+   "median_nw": 1126158,
+   "games": 52,
+   "players": [
+    "play-v3"
+   ],
+   "wake_days": [
+    180
+   ],
+   "vs": {
+    "search:3:random": {
+     "diff": 0.3975,
+     "ci95": [
+      0.1612,
+      0.5789
+     ]
+    },
+    "search:2": {
+     "diff": 0.4781,
+     "ci95": [
+      0.3127,
+      0.6382
+     ]
+    }
+   },
+   "decisions": {
+    "decisions": 373,
+    "best_minus_mean": {
+     "mean": 0.2504,
+     "median": 0.1578,
+     "p90": 0.654
+    },
+    "best_minus_hold": {
+     "mean": 0.31,
+     "median": 0.1204
+    },
+    "best_is": {
+     "hold": 0.1528,
+     "expand": 0.37,
+     "route": 0.4772
+    },
+    "played_built": 0.7668,
+    "uninformative": 7,
+    "played_best": 1.0,
+    "second_tries": 0,
+    "fork_vs_live": {
+     "tries_checked": 316,
+     "mismatched": 0
+    }
+   },
+   "cost": {
+    "options_per_decision": 10.755,
+    "s_per_decision": 29.996
+   }
+  },
+  "random": {
+   "mean_asinh_nw": 1.9731,
+   "mean_score": 0.5938,
+   "median_nw": 441479,
+   "games": 52,
+   "players": [
+    "play-v3"
+   ],
+   "wake_days": [
+    180
+   ],
+   "vs": {
+    "search:3:random": {
+     "diff": -0.5209,
+     "ci95": [
+      -0.7543,
+      -0.3183
+     ]
+    },
+    "search:2": {
+     "diff": -0.4404,
+     "ci95": [
+      -0.694,
+      -0.2031
+     ]
+    }
+   },
+   "cost": {
+    "options_per_decision": null,
+    "s_per_decision": 0.0
+   }
+  }
+ },
+ "warnings": []
+}

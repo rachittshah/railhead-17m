@@ -124,8 +124,15 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
         arena-dev-0100, 1 seed: model GBP 10.38M, random 7.09M, longest 7.33M (runs/play-arena0100).
   - Branches: audit/2026-11-10-fixes (PR #1 -> main), oracle/closed-loop-ceiling (PR #2 -> audit). The
     checkout is on the oracle branch.
-- Now: [→] local-suite oracle (11 ten-year maps, runs/play-oracle-local); model + k-option lookahead
-  (search at decision time) as the next experiment.
+  - [x] Local suite, 11 ten-year maps x 1 seed: oracle vs random +1.277 [+0.547,+2.462], vs model +1.291.
+  - [x] SEARCH (src/rh17m/search.py; `search:<k>` = model's top k + hold simulated with the oracle's code;
+        `search:<k>:random` = control). Devhub 26x2: search:3 vs random +0.598 [+0.290,+0.899], share of
+        oracle gain 0.65 at 3.8 options/decision; control 0.57; search:2 0.48; model alone 0.19.
+        search:3 vs control +0.077 [-0.147,+0.243], 19/26 maps -> the lookahead does most of the work,
+        the model is a weak prior.
+- Now: [→] expert iteration: train on the oracle and search decisions (about 1,300 decisions with simulated
+  values, under a good policy's states), then re-run search:3 vs its control: the model's edge over random
+  candidates is the number to move.
 - Next: fix the evaluation (cluster bootstrap by map, gate off the test maps, run-off from the task, label
   version filter) before any further climb pass; then expert iteration (distil the search back into the
   model); widen the action space (loan, wake cadence); HF publish still needs `hf auth login`.
