@@ -184,6 +184,78 @@ def fast_saves(fmt: str = "none"):
             misc["savegame_format"] = old
 
 
+RUNOFF_DAYS = 365  # the run-off the labeller assumes (tycoon tasks have 730: see rollout_chunks)
+
+
+def rollout_chunks(cfg: LabelConfig, end_date: int, date: int, runoff_days: int = RUNOFF_DAYS) -> int:
+    """Rollout length in chunks: ``cfg.chunks``, or fewer when the game (horizon + run-off) ends first. The
+    labeller passes its fixed 365-day run-off; the closed-loop oracle passes the task's own."""
+    left = end_date + runoff_days - date
+    return max(1, min(cfg.chunks, -(-left // cfg.chunk_days)))
+
+
+def build_options(parent: World, tmp: Path, cands: list, exps: list) -> tuple[dict[str, Path], dict[str, dict], set[str]]:
+    """Build every option on its own fork of ``parent`` (which is left untouched) and save the result. Returns
+    the savegame per simulated option (``hold`` is ``parent`` itself), the build report per option, and the
+    aliases: options that failed before spending anything, whose world is the hold world."""
+    saves: dict[str, Path] = {HOLD: parent.save(tmp / "opt-hold.sav")}
+    builds: dict[str, dict] = {HOLD: {"ok": True, "cost": 0, "failed_step": None}}
+    aliases: set[str] = set()  # failed before spending anything: the world is the hold world
+    for i, c in enumerate(cands):
+        with tracing.span("label.build", option=c.candidate_id, kind="route") as sp:
+            child = parent.fork(tmp / f"build{i}")
+            try:
+                try:
+                    with tracing.span("label.build_affordable", bridge=True):
+                        br, used = build_affordable(child, c.a["id"], c.b["id"])
+                    builds[c.candidate_id] = {"ok": br.ok, "cost": br.cost, "failed_step": br.failed_step,
+                                              "airport_type": br.airport_type, "planes": used[1],
+                                              "ladder": list(used)}
+                    untouched = not br.ok and not br.cost and not br.steps
+                except BridgeError as e:
+                    builds[c.candidate_id] = {"ok": False, "cost": None, "failed_step": f"raise:{e.code}"}
+                    untouched = False
+                b = builds[c.candidate_id]
+                sp.set_attributes({"ok": b["ok"], "cost": b["cost"] or 0, "failed_step": b["failed_step"] or "",
+                                   "alias": untouched})
+                if untouched:
+                    aliases.add(c.candidate_id)
+                else:
+                    saves[c.candidate_id] = child.save(tmp / f"opt-{i}.sav")
+            finally:
+                child.close()
+    for i, e in enumerate(exps):
+        with tracing.span("label.build", option=e.key, kind="expand") as sp:
+            child = parent.fork(tmp / f"expand{i}")
+            try:
+                with tracing.span("label.expand_affordable"):
+                    r = expand_affordable(child, e)
+                builds[e.key] = {"ok": r["ok"], "cost": r["cost"], "failed_step": r["failed_step"],
+                                 "planes": r["planes"], "kind": "expand"}
+                sp.set_attributes({"ok": r["ok"], "cost": r["cost"] or 0, "planes": r["planes"] or 0,
+                                   "alias": not r["planes"] and not r["cost"]})
+                if not r["planes"] and not r["cost"]:
+                    aliases.add(e.key)
+                else:
+                    saves[e.key] = child.save(tmp / f"opt-x{i}.sav")
+            finally:
+                child.close()
+    return saves, builds, aliases
+
+
+def roll_options(tmp: Path, saves: dict[str, Path], builds: dict[str, dict], aliases: set[str], seeds: list[int],
+                 cfg: LabelConfig, chunks: int) -> dict[str, Any]:
+    """Roll every simulated option forward once per seed (the same seeds for every option: common random
+    numbers); an alias shares hold's rollouts."""
+    outcomes: dict[str, Any] = {}
+    for key, save in saves.items():
+        outcomes[key] = {**builds[key], "rollouts": [
+            _rollout(save, tmp / f"roll-{key}-{m}", s, cfg, chunks, key=key) for m, s in enumerate(seeds)]}
+    for key in aliases:  # same world and same seeds as hold: the rollouts would repeat hold's exactly
+        outcomes[key] = {**builds[key], "alias": HOLD, "rollouts": outcomes[HOLD]["rollouts"]}
+    return outcomes
+
+
 def label_state(root: Path, state_id: str, cfg: LabelConfig = LabelConfig()) -> dict:
     """Label one state (see the module docstring). Returns the record; does not write it."""
     with fast_saves():
@@ -218,49 +290,8 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
                 extras = candidate_extras(snap, cands, labels)
                 nw0, money0 = _net_worth(parent)
                 sp.set_attributes({"candidates": len(cands), "nw0": nw0})
-            saves: dict[str, Path] = {HOLD: parent.save(tmp / "opt-hold.sav")}
-            builds: dict[str, dict] = {HOLD: {"ok": True, "cost": 0, "failed_step": None}}
-            aliases: set[str] = set()  # failed before spending anything: the world is the hold world
-            for i, c in enumerate(cands):
-                with tracing.span("label.build", option=c.candidate_id, kind="route") as sp:
-                    child = parent.fork(tmp / f"build{i}")
-                    try:
-                        try:
-                            with tracing.span("label.build_affordable", bridge=True):
-                                br, used = build_affordable(child, c.a["id"], c.b["id"])
-                            builds[c.candidate_id] = {"ok": br.ok, "cost": br.cost, "failed_step": br.failed_step,
-                                                      "airport_type": br.airport_type, "planes": used[1],
-                                                      "ladder": list(used)}
-                            untouched = not br.ok and not br.cost and not br.steps
-                        except BridgeError as e:
-                            builds[c.candidate_id] = {"ok": False, "cost": None, "failed_step": f"raise:{e.code}"}
-                            untouched = False
-                        b = builds[c.candidate_id]
-                        sp.set_attributes({"ok": b["ok"], "cost": b["cost"] or 0, "failed_step": b["failed_step"] or "",
-                                           "alias": untouched})
-                        if untouched:
-                            aliases.add(c.candidate_id)
-                        else:
-                            saves[c.candidate_id] = child.save(tmp / f"opt-{i}.sav")
-                    finally:
-                        child.close()
             exps = expansion_candidates(snap, routes, parent.call("depots"), cfg.max_expand) if cfg.max_expand else []
-            for i, e in enumerate(exps):
-                with tracing.span("label.build", option=e.key, kind="expand") as sp:
-                    child = parent.fork(tmp / f"expand{i}")
-                    try:
-                        with tracing.span("label.expand_affordable"):
-                            r = expand_affordable(child, e)
-                        builds[e.key] = {"ok": r["ok"], "cost": r["cost"], "failed_step": r["failed_step"],
-                                         "planes": r["planes"], "kind": "expand"}
-                        sp.set_attributes({"ok": r["ok"], "cost": r["cost"] or 0, "planes": r["planes"] or 0,
-                                           "alias": not r["planes"] and not r["cost"]})
-                        if not r["planes"] and not r["cost"]:
-                            aliases.add(e.key)
-                        else:
-                            saves[e.key] = child.save(tmp / f"opt-x{i}.sav")
-                    finally:
-                        child.close()
+            saves, builds, aliases = build_options(parent, tmp, cands, exps)
         finally:
             parent.close()
         t_build = time.perf_counter() - t0
@@ -275,15 +306,9 @@ def _label_state(root: Path, state_id: str, cfg: LabelConfig) -> dict:
                     "builds": builds, "timing": _timing(t_build, t_build, gs_calls, gs_ms,
                                                         tracing.server_starts() - starts0)}
         # No need to simulate past the end of the game (horizon + run-off year), where the arena scores.
-        left = meta.end_date + 365 - meta.date
-        chunks = max(1, min(cfg.chunks, -(-left // cfg.chunk_days)))
+        chunks = rollout_chunks(cfg, meta.end_date, meta.date)
         tracing.annotate(options=len(options), simulated=len(saves), aliases=len(aliases), chunks=chunks)
-        outcomes: dict[str, Any] = {}
-        for key, save in saves.items():
-            outcomes[key] = {**builds[key], "rollouts": [
-                _rollout(save, tmp / f"roll-{key}-{m}", s, cfg, chunks, key=key) for m, s in enumerate(seeds)]}
-        for key in aliases:  # same world and same seeds as hold: the rollouts would repeat hold's exactly
-            outcomes[key] = {**builds[key], "alias": HOLD, "rollouts": outcomes[HOLD]["rollouts"]}
+        outcomes = roll_options(tmp, saves, builds, aliases, seeds, cfg, chunks)
     return {
         "version": cfg.version, "config": asdict(cfg), "state": asdict(meta), "seeds": seeds,
         "nw0": nw0, "money0": money0, "rendered_state": rendered,

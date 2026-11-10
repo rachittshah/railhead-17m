@@ -118,9 +118,9 @@ def _play(a: argparse.Namespace) -> int:
         tasks = sorted(p.parent.name for p in HUB_TASKS_ROOT.glob("*-dev-*/start.sav")
                        if _json.loads((p.parent / "task.json").read_text())["scenario"].get("map_log2", 0) >= 8)
     for r in tournament(tasks, a.policies, list(range(a.seed0, a.seed0 + a.seeds)), Path(a.out),
-                        wake_days=a.wake_days, workers=a.workers, model_dir=a.model):
-        print(json.dumps({k: r[k] for k in ("policy", "task", "seed", "final_nw", "score", "builds", "built_ok")}),
-              flush=True)
+                        wake_days=a.wake_days, workers=a.workers, model_dir=a.model, max_wakes=a.max_wakes):
+        print(json.dumps({k: r.get(k) for k in ("policy", "task", "seed", "final_nw", "score", "builds", "built_ok",
+                                                 "wall_s", "error") if k in r}), flush=True)
     return 0
 
 
@@ -219,6 +219,15 @@ def _observe(a: argparse.Namespace) -> int:
 
 
 def _play_report(a: argparse.Namespace) -> int:
+    if a.runs:  # explicit run folders: paired on (task, seed), every label against --refs, map bootstrap
+        from rh17m.play import compare, format_compare
+
+        out = compare([Path(d) for d in a.runs], refs=a.refs or None, labels=a.labels or None)
+        print(format_compare(out))
+        if a.out:
+            Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+            Path(a.out).write_text(json.dumps(out, indent=1))
+        return 0
     from rh17m.play import report
 
     out = report(Path(a.root))
@@ -330,6 +339,7 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--seed0", type=int, default=1)
     pl.add_argument("--wake-days", type=int, default=90)
     pl.add_argument("--workers", type=int, default=4)
+    pl.add_argument("--max-wakes", type=int, default=None, help="stop each game after N wake-ups (smoke test)")
     pl.add_argument("--out", default=str(Path(__file__).resolve().parents[2] / "runs" / "play"))
     pl.set_defaults(fn=_play)
 
@@ -356,6 +366,10 @@ def main(argv: list[str] | None = None) -> int:
     pr = sub.add_parser("play-report", help="paired closed-loop summary of every policy under runs/play")
     pr.add_argument("--root", default=str(Path(__file__).resolve().parents[2] / "runs" / "play"))
     pr.add_argument("--track", action="store_true", help="also log tables, curve images and a report to Trackio")
+    pr.add_argument("--runs", nargs="*", default=[], help="run folders to compare (instead of --root's subfolders)")
+    pr.add_argument("--refs", nargs="*", default=[], help="labels to compare every label with (default: all)")
+    pr.add_argument("--labels", nargs="*", default=[], help="only these labels (e.g. oracle random model:<run>)")
+    pr.add_argument("--out", default="", help="with --runs: write the comparison JSON here")
     pr.set_defaults(fn=_play_report)
 
     gt = sub.add_parser("gate", help="closed-loop gate: candidate vs reference model on the devhub maps")
