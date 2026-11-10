@@ -9,8 +9,9 @@ a 10% gain counts about the same at any size. The training target is a tempered 
 (``tau`` in asinh units). A state whose options are all within ``min_spread`` of each other carries no signal
 and is dropped.
 
-Splits are by map: arena-dev-* maps are the held-out ``test`` split; ``VAL_MAPS`` (three train maps) are the
-``val`` split used for model selection and temperature fitting; the remaining train maps are ``train``.
+Splits are by map (``map_split``): *-dev-* maps are the held-out ``test`` split, *-ood-* maps ``ood``;
+``VAL_MAPS`` (three train maps) plus a fixed hashed eighth of the other train maps are the ``val`` split used
+for model selection and temperature fitting; the remaining train maps are ``train``.
 """
 
 from __future__ import annotations

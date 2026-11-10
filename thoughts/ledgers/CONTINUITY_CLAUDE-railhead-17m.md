@@ -102,9 +102,55 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
 - PAUSED 2026-10-24 ~10:15 at user request (fans/CPU): everything stopped via scripts/stop.sh. 2,618 labelled
   states. Incumbent restored to 1023-1627-base-s1 (two aborted passes had overwritten it). Climb passes 10/11
   were aborted (tmux killed by an orphan sweep at 09:20; GPU run stopped by user) -> never pkill ad hoc.
-- Next: CPU hyperoptimisation plan `thoughts/shared/plans/2026-10-29-cpu-hyperoptimize.md` (Phase 0
-  instrumentation first: bridge-call count per build decides Phase 2 vs 3 order); resume climb; judge
-  candidates in closed loop; HF publish needs `hf auth login`.
+- PERF WORK 2026-10-29 (plan `thoughts/shared/plans/2026-10-29-cpu-hyperoptimize.md`; pipeline stayed paused):
+  - [x] Phase 0 instrumentation (dfc9a1b): 1,269 bridge calls per option -> Phase 2 first
+  - [x] Phase 2 pipelined site search (614b67c; rhs1 PR #1 still open): build_s 38.8 -> 18.8, 24/24 labels equal
+  - [x] Phase 3 server pool code, opt-in RH17M_POOL=1 (d3da588, 614b13b). Reload correctness boxes in the
+        plan are unticked; no label in data/ was made with the pool
+  - [x] Phase 4 partly: GATE_WORKERS 8 / DAGGER_WORKERS 6 (4b7f254), sweep scripts (70d3cfd, 65c71a1)
+  - Sweep, 14 workers, 1-seed jobs, 10-min windows (runs/sweep): 906 states/h base stack vs 1,650/h with
+    pool + pipelined rhs1 + the pr-check engine. Launch defaults were NOT changed (still 22 workers, POOL=0).
+  - Engine variant (flags + stdin poll, railhead PR #3): 11% faster uncontended; no keep/drop verdict recorded
+- AUDIT 2026-11-10 (findings, nothing re-run): the climb keep test resamples single decisions although val is
+  398 examples from 10 maps (three maps hold 373), and val also picks the epoch and fits the temperature;
+  the closed-loop gate runs on Hub dev maps, which map_split calls `test`; tycoon labels value at 365 run-off
+  days where the tasks say 730 (79 states); seven label versions are mixed with no version filter (1,561 of
+  2,618 are lbl-v4). No closed-loop oracle (always pick the simulator-best option) has ever been run.
+  - [x] ORACLE CEILING 2026-11-10 (src/rh17m/oracle.py, `rh17m play --policies oracle`, `rh17m play-report`):
+        26 devhub maps x 2 seeds, paired, map bootstrap: oracle vs random +0.918 [+0.604,+1.213] (25/26 maps),
+        vs model +0.747 [+0.452,+1.082] (24/26); model vs random +0.171 (n.s.) = 19% of the oracle's gain.
+        -> the labels and action space carry value; the MODEL is the bottleneck; the eval resolves this size.
+        Oracle decisions (373): best = route 48%, expand 37%, hold 15%; fork vs live build 316/316 equal.
+        arena-dev-0100, 1 seed: model GBP 10.38M, random 7.09M, longest 7.33M (runs/play-arena0100).
+  - Branches: audit/2026-11-10-fixes (PR #1 -> main), oracle/closed-loop-ceiling (PR #2 -> audit). The
+    checkout is on the oracle branch. FINAL PR #3 = oracle/closed-loop-ceiling -> main (#1 + #2 in one).
+    Merge order across repos: railhead-system1 #4, railhead #7, then this #3. Tests pass against both
+    of those stacks (153 unit, plus the real-engine label test with the pipelined builder).
+  - [x] Local suite, 11 ten-year maps x 1 seed: oracle vs random +1.277 [+0.547,+2.462], vs model +1.291.
+  - [x] SEARCH (src/rh17m/search.py; `search:<k>` = model's top k + hold simulated with the oracle's code;
+        `search:<k>:random` = control). Devhub 26x2: search:3 vs random +0.598 [+0.290,+0.899], share of
+        oracle gain 0.65 at 3.8 options/decision; control 0.57; search:2 0.48; model alone 0.19.
+        search:3 vs control +0.077 [-0.147,+0.243], 19/26 maps -> the lookahead does most of the work,
+        the model is a weak prior.
+- Now: [→] expert iteration: run the oracle and search policies on the TRAIN maps, train on those decisions,
+  then re-run search:3 vs its control: the model's edge over random candidates is the number to move.
+  - CORRECTION 2026-11-10: the ~1,300 oracle/search decisions already on disk are all on `-dev-` maps
+    (map_split = test, and the closed-loop suites play those maps). Do NOT train on them.
+  - `rh17m play` keeps each option's value per decision but not the observation text or a savegame, so
+    turning a played decision into a training example needs a small converter (code, no compute).
+  - Compute estimate (measured 2026-11-10, M4 Max, 8 games at once, pipelined builder): 31.4 worker-s per
+    oracle decision = 896 decisions/h; training 0.028 s per example-epoch (6,100 examples x 8 epochs =
+    23 min); search:3 on devhub 12.5 min per model. One game per train map (88 maps: 61 one-year, 16
+    five-year, 11 ten-year) is 590 decisions, so a first round of 5 passes is about 3,000 decisions:
+    data 3.3 h + 3 seeds 0.8 h + evaluation 2.5 h, about 7 h. Each further 1,000 decisions: 67 min.
+    Savings measured on disk the same day: 2,045 of 6,763 oracle options (30%) failed to build with zero
+    spend, so a pre-fork filter is worth trying; pruning to the top half of options after 182 days keeps
+    the final best in only 61% of 1,341 lbl-v4 states (unsafe), after 364 days in 92% (mean regret 0.008).
+    Vast.ai live offers that day: USD 0.005-0.012 per CPU thread-hour (64 threads 0.32-0.67/h, 128 threads
+    0.80-1.00/h); thread speed vs an M4 worker assumed 0.2-0.3, UNCONFIRMED (run `rh17m bench` there).
+- Next: fix the evaluation (cluster bootstrap by map, gate off the test maps, run-off from the task, label
+  version filter) before any further climb pass; then expert iteration (distil the search back into the
+  model); widen the action space (loan, wake cadence); HF publish still needs `hf auth login`.
 
 ## Open questions
 - UNCONFIRMED: HF write token (user must run `hf auth login`).

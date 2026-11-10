@@ -1,0 +1,82 @@
+{
+ "tasks": [
+  "arena-dev-0000",
+  "arena-dev-0001",
+  "arena-dev-0003",
+  "arena-dev-0005",
+  "arena-dev-0007",
+  "arena-dev-0008",
+  "arena-dev-0009",
+  "arena-dev-0010",
+  "arena-dev-0011",
+  "arena-dev-0013",
+  "arena-dev-0014",
+  "arena-dev-0017",
+  "arena-dev-0018",
+  "arena-dev-0019",
+  "tycoon-dev-0022",
+  "tycoon-dev-0030",
+  "tycoon-dev-0034",
+  "tycoon-dev-0035",
+  "tycoon-dev-0037",
+  "tycoon-dev-0051",
+  "tycoon-dev-0054",
+  "tycoon-dev-0057",
+  "tycoon-dev-0077",
+  "tycoon-dev-0080",
+  "tycoon-dev-0089",
+  "tycoon-dev-0092"
+ ],
+ "policies": {
+  "model:ensdistill-1713-c02": {
+   "mean_score": 0.5761,
+   "median_nw": 221336,
+   "mean_asinh_nw": 1.7043,
+   "games": 52,
+   "vs_random_asinh_nw": [
+    -0.2688,
+    -0.6839,
+    0.1101
+   ]
+  },
+  "model:1023-1627-base-s1": {
+   "mean_score": 0.6396,
+   "median_nw": 562735,
+   "mean_asinh_nw": 2.1441,
+   "games": 52,
+   "vs_random_asinh_nw": [
+    0.171,
+    -0.2307,
+    0.5294
+   ]
+  },
+  "model:selfdistill-1713-c05": {
+   "mean_score": 0.5667,
+   "median_nw": 262341,
+   "mean_asinh_nw": 1.7389,
+   "games": 52,
+   "vs_random_asinh_nw": [
+    -0.2342,
+    -0.6939,
+    0.1634
+   ]
+  },
+  "random": {
+   "mean_score": 0.5938,
+   "median_nw": 437736,
+   "mean_asinh_nw": 1.9731,
+   "games": 52
+  },
+  "longest": {
+   "mean_score": 0.5902,
+   "median_nw": 404734,
+   "mean_asinh_nw": 1.8756,
+   "games": 52,
+   "vs_random_asinh_nw": [
+    -0.0975,
+    -0.2894,
+    0.0903
+   ]
+  }
+ }
+}
