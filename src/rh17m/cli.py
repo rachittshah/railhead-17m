@@ -107,6 +107,17 @@ def _train(a: argparse.Namespace) -> int:
     return 0
 
 
+def _loop_edit(a: argparse.Namespace) -> int:
+    from rh17m.loopedit import LoopConfig, run
+
+    cfg = LoopConfig(model=a.model, calib=a.calib, holdout=a.holdout, rounds=a.rounds, ridge=a.ridge, seed=a.seed,
+                     option_weight=a.option_weight)
+    res = run(cfg, Path(a.labels), Path(a.out) / a.name, log=lambda s: print(s, flush=True))
+    print(json.dumps({k: res[k] for k in ("chosen", "best_data_free", "temperature", "parameters",
+                                          "tied_after_reload", "seconds")}, indent=1))
+    return 0
+
+
 def _play(a: argparse.Namespace) -> int:
     from rh17m.play import tournament
     from rh17m.states import HUB_TASKS_ROOT
@@ -318,7 +329,20 @@ def main(argv: list[str] | None = None) -> int:
     tr.add_argument("--set", nargs="*", default=[], help="TrainConfig overrides key=json, data.<key>=json")
     tr.set_defaults(fn=_train)
 
-    cl = sub.add_parser("climb", help="hillclimb training/data settings on val with a noise floor")
+    le = sub.add_parser("loop-edit", help="weight-space edit: tie the encoder's blocks into a looped transformer")
+    le.add_argument("--name", required=True)
+    le.add_argument("--model", required=True, help="a trained model export (runs/train/<run>/model)")
+    le.add_argument("--labels", default=str(DATA / "labels"))
+    le.add_argument("--out", default=str(Path(__file__).resolve().parents[2] / "runs" / "loop"))
+    le.add_argument("--calib", type=int, default=384)
+    le.add_argument("--holdout", type=int, default=400)
+    le.add_argument("--rounds", type=int, default=3)
+    le.add_argument("--ridge", type=float, default=1e-3)
+    le.add_argument("--seed", type=int, default=0)
+    le.add_argument("--option-weight", type=float, default=1.0)
+    le.set_defaults(fn=_loop_edit)
+
+    cl = sub.add_parser("climb",help="hillclimb training/data settings on val with a noise floor")
     cl.add_argument("--labels", default=str(DATA / "labels"))
     cl.add_argument("--set", nargs="*", default=[])
     cl.add_argument("--seeds", type=int, default=2, help="seeds per config; scores are seed-averaged")
