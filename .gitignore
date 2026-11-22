@@ -12,6 +12,7 @@ checkpoints/
 .build-done
 data/
 runs/train/*/model/
+runs/loop/*/model/
 runs/play/*/
 runs/teachers/
 runs/play-v1/

@@ -121,6 +121,25 @@ decision state (savegame)                       options: 8 air candidates (route
 - Training: soft-target cross-entropy, AdamW (encoder 1e-4, heads 5e-4), option-order shuffling and both
   prefix layouts as augmentation, epoch selection on val expected regret, temperature fitted on val NLL.
 
+## Looped variant (weight edit, 2026-11-21)
+
+`rh17m loop-edit` turns a trained model into a looped transformer by editing its weights, with no gradient
+step. The result is layer 0 plus one (sliding, sliding, full) block applied twice; layers 4-6 are
+byte-identical to 1-3.
+
+1. Exact rewrites put both blocks in one gauge: LayerNorm gains folded into the next Linear, attention heads
+   permuted, value bases rotated, RoPE-pair phases turned, MLP neurons permuted and gate signs flipped.
+2. The blocks are then tied by closed-form least squares on the looped model's own activations, using 600
+   unlabelled train decisions.
+
+On the incumbent (`runs/loop/1023-1627-base-s1-loop2`):
+
+- **Fidelity:** val/test KL to the original is 0.19, with top-1 agreement of 0.58 / 0.59.
+- **Regret:** val +0.007 [-0.046, +0.030] and test +0.020 [-0.024, +0.073], map bootstrap, neither significant.
+- **Not run:** the closed-loop gate.
+
+Full write-up, with the maths, every variant and the tuning history: `docs/loop-edit.md`.
+
 ## Metrics
 
 Offline, against simulator values (asinh units; 0.1 is about 10% of net worth at the horizon):

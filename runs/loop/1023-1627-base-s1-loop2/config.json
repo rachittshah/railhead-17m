@@ -1,0 +1,16 @@
+{
+ "model": "runs/train/1023-1627-base-s1/model",
+ "block": 3,
+ "calib": 600,
+ "holdout": 400,
+ "rounds": 4,
+ "ridge": 0.001,
+ "option_weight": 6.0,
+ "batch_size": 8,
+ "seed": 0,
+ "extra_loops": [
+  1,
+  3,
+  4
+ ]
+}
