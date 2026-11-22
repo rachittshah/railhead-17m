@@ -118,6 +118,14 @@ def _loop_edit(a: argparse.Namespace) -> int:
     return 0
 
 
+def _loop_figures(a: argparse.Namespace) -> int:
+    from rh17m.loopviz import run
+
+    res = run(Path(a.run), Path(a.out), Path(a.labels), log=lambda s: print(s, flush=True), fixed_loops=a.loops)
+    print(json.dumps({"out": res["out"], "files": len(res["files"])}))
+    return 0
+
+
 def _play(a: argparse.Namespace) -> int:
     from rh17m.play import tournament
     from rh17m.states import HUB_TASKS_ROOT
@@ -342,7 +350,14 @@ def main(argv: list[str] | None = None) -> int:
     le.add_argument("--option-weight", type=float, default=1.0)
     le.set_defaults(fn=_loop_edit)
 
-    cl = sub.add_parser("climb",help="hillclimb training/data settings on val with a noise floor")
+    lf = sub.add_parser("loop-figures", help="charts, model visualizations and an animation for a loop-edit run")
+    lf.add_argument("--run", required=True, help="a loop-edit run directory (runs/loop/<name>)")
+    lf.add_argument("--out", default=str(Path(__file__).resolve().parents[2] / "docs" / "figures" / "loop-edit"))
+    lf.add_argument("--labels", default=str(DATA / "labels"))
+    lf.add_argument("--loops", type=int, default=8, help="largest loop count in the fixed-point figure")
+    lf.set_defaults(fn=_loop_figures)
+
+    cl = sub.add_parser("climb", help="hillclimb training/data settings on val with a noise floor")
     cl.add_argument("--labels", default=str(DATA / "labels"))
     cl.add_argument("--set", nargs="*", default=[])
     cl.add_argument("--seeds", type=int, default=2, help="seeds per config; scores are seed-averaged")

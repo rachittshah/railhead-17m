@@ -156,3 +156,33 @@ def test_weights_round_trip():
     again = L.weights(L.rebuild(model, w))
     assert set(again) == set(w) and all(np.array_equal(again[k].astype(np.float32), w[k].astype(np.float32)) for k in w)
     assert isinstance(L.rebuild(model, w).encoder.backbone.layers[1].attn.Wqkv.weight, mx.array)
+
+
+def test_figures_render_from_results(tmp_path):
+    """The results charts and the weight-similarity measurement run on a small model and a results dict."""
+    viz = pytest.importorskip("rh17m.loopviz")
+    model = _model(3)
+    raw, after, names, heads_info, mlp_info = viz.weight_similarity(L.weights(model), heads=2)
+    assert raw.shape == after.shape == (3, 7) and len(heads_info) == len(mlp_info) == 3
+    assert after.mean() > raw.mean()  # alignment can only make the blocks look more alike
+    fid = {"kl": 0.2, "top1": 0.6, "spearman": 0.8, "n": 10}
+    metrics = {"regret": 0.3, "play_regret": 0.3, "exp_regret": 0.35, "n": 10}
+    diff = {"diff": 0.01, "lo": -0.02, "hi": 0.04}
+    results = {
+        "holdout": 10, "chosen": "lsq2", "temperature": 2.0, "source_temperature": 2.1,
+        "variants_holdout": {"copy_first": {**fid, "kl": 0.6, "data_free": True},
+                             "regmean": {**fid, "data_free": False}, "lsq1": {**fid, "data_free": False},
+                             "lsq2": {**fid, "kl": 0.1, "data_free": False}},
+        "loops": {str(n): {"layers": 1 + 3 * n, "holdout": fid, "val": metrics} for n in (1, 2, 3)},
+        "parameters": {"all": 16_798_211, "encoder_layers": 3_902_720, "unique_encoder_layers": 2_230_016},
+        **{s: {"maps": 3, "original": metrics, "looped_minus_original": {m: diff for m in
+                                                                          ("regret", "play_regret", "exp_regret")}}
+           for s in ("val", "test")},
+    }
+    for theme in viz.THEMES:
+        viz.style(theme)
+        for fig in (viz.fig_variants, viz.fig_sweeps, viz.fig_loops, viz.fig_regret, viz.fig_parameters):
+            fig(results, tmp_path, theme)
+        viz.fig_weight_similarity(raw, after, names, tmp_path, theme)
+        viz.fig_head_match(heads_info, tmp_path, theme)
+    assert len(list(tmp_path.glob("*.svg"))) == 14 and len(list(tmp_path.glob("*-dark.svg"))) == 7
