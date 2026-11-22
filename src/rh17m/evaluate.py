@@ -89,6 +89,23 @@ def bootstrap_diff(a: list[float], b: list[float], n: int = 2000, seed: int = 0)
     return sum(d) / len(d), means[int(0.025 * n)], means[int(0.975 * n) - 1]
 
 
+def cluster_bootstrap_diff(a: list[float], b: list[float], clusters: list[str], n: int = 2000,
+                           seed: int = 0) -> tuple[float, float, float]:
+    """Mean of a - b over paired examples with a 95% percentile bootstrap that resamples whole clusters
+    (maps): decisions from one map are not independent, so resampling single decisions is too narrow."""
+    groups: dict[str, list[float]] = {}
+    for x, y, c in zip(a, b, clusters, strict=True):
+        groups.setdefault(c, []).append(x - y)
+    sums = [(sum(d), len(d)) for d in groups.values()]
+    rng = random.Random(seed)
+    means = []
+    for _ in range(n):
+        draw = [rng.choice(sums) for _ in sums]
+        means.append(sum(s for s, _ in draw) / sum(k for _, k in draw))
+    means.sort()
+    return sum(s for s, _ in sums) / sum(k for _, k in sums), means[int(0.025 * n)], means[int(0.975 * n) - 1]
+
+
 # ---------------------------------------------------------------------- baselines
 def _onehot(ex: dict, key: str) -> dict[str, float]:
     return {k: float(k == key) for k, _ in ex["options"]}
