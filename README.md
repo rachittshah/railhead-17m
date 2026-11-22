@@ -139,7 +139,7 @@ On the incumbent (`runs/loop/1023-1627-base-s1-loop2`):
 - **Not run:** the closed-loop gate.
 
 Full write-up, with the maths, every variant and the tuning history: `docs/loop-edit.md`. It has 14 figures
-(each with a light and dark version), an animation and 7 flowcharts. `rh17m loop-figures` regenerates them.
+(each with a light and dark version), an animation and 6 flowcharts. `rh17m loop-figures` regenerates them.
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loop-edit/architecture-dark.svg">
