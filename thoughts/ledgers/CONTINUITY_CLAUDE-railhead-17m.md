@@ -132,6 +132,27 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
         oracle gain 0.65 at 3.8 options/decision; control 0.57; search:2 0.48; model alone 0.19.
         search:3 vs control +0.077 [-0.147,+0.243], 19/26 maps -> the lookahead does most of the work,
         the model is a weak prior.
+- LOOP EDIT 2026-11-21 (branch loop/weight-edit, NOT committed; src/rh17m/loopedit.py, `rh17m loop-edit`,
+  tests/unit/test_loopedit.py, evaluate.cluster_bootstrap_diff; 165 unit tests pass):
+  - [x] The incumbent is now also a LOOPED transformer by weight edits alone (no gradient step):
+        runs/loop/1023-1627-base-s1-loop2/model = layer 0 + one (sliding, sliding, full) block applied twice;
+        layers 4-6 are byte-identical to 1-3 after reload, in MLX and in the published PyTorch runtime
+        (strict load, 16 parity cases, max |p| diff 1.1e-6). Encoder-layer parameters 3.90M -> 2.23M unique.
+  - Method: fold LayerNorm gains into the next Linear and re-gauge layers 4-6 onto 1-3 (head order, value
+    basis, RoPE-pair phases, MLP neuron order + gate sign): exact (KL 4e-10). Then tie. Ranked on 400
+    decisions from 16 held-out TRAIN maps by KL to the incumbent: copy 1-3 0.677, copy 4-6 0.758, mean 0.885,
+    aligned mean 0.837, RegMean 0.395, RegMean + 4 Gauss-Seidel least-squares sweeps on the looped model's own
+    activations 0.138 (chosen; 600 calibration decisions from the other train maps, option tokens x6).
+    Sweeps plateau after 2; a least-squares head refit did not help (0.152 vs 0.147) and was removed.
+  - It is a real loop: the same block once (4 layers) KL 0.737, twice 0.138, three times 0.146, four 0.148.
+  - Not the same model: top-1 agreement with the incumbent 0.58 (val) / 0.59 (test), Spearman 0.79 / 0.83.
+  - Labels (map bootstrap, looped minus incumbent): val (398 decisions, 10 maps) regret 0.336 vs 0.330,
+    +0.007 [-0.046, +0.030]; test (204, 29 maps) 0.443 vs 0.423, +0.020 [-0.024, +0.073]; play_regret
+    +0.009 / +0.014, both n.s. The incumbent has little edge to lose, so "n.s." is weak evidence.
+  - NOT run: the closed-loop gate (needs the simulator; pipeline is paused). Val/test were printed by the
+    tuning runs too; every choice (variant, sweeps, option weight) was made on the held-out train-map KL.
+  - Next for this line: retrofit fine-tune from this export (the loop papers' recipe) and compare 3 seeds +
+    A/A against the unlooped incumbent; then the gate.
 - Now: [→] expert iteration: run the oracle and search policies on the TRAIN maps, train on those decisions,
   then re-run search:3 vs its control: the model's edge over random candidates is the number to move.
   - CORRECTION 2026-11-10: the ~1,300 oracle/search decisions already on disk are all on `-dev-` maps
@@ -157,6 +178,6 @@ bootstrap CI) and in closed-loop games, with weights + card on HF.
 - UNCONFIRMED: label noise floor with 3 seeds; whether 2 seeds suffice.
 
 ## Working set
-- Repo: ~/railhead-17m (branch main). Data: data/{states,labels,tasks,logs} (git-ignored).
+- Repo: ~/railhead-17m (branch loop/weight-edit off oracle/closed-loop-ceiling = origin/main). Data: data/{states,labels,tasks,logs} (git-ignored).
 - Pipeline: `scripts/launch.sh` (tmux session rh17m, one window per stage); `scripts/stop.sh`. Logs: data/logs/.
 - Tests: `.venv/bin/python -m pytest -q tests/unit`.
