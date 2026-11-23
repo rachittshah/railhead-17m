@@ -126,6 +126,15 @@ def _loop_figures(a: argparse.Namespace) -> int:
     return 0
 
 
+def _loop_explainer(a: argparse.Namespace) -> int:
+    from rh17m.loopexplain import run
+
+    res = run(Path(a.run), Path(a.out), Path(a.labels), Path(a.figures), count=a.count,
+              log=lambda s: print(s, flush=True))
+    print(json.dumps(res))
+    return 0
+
+
 def _play(a: argparse.Namespace) -> int:
     from rh17m.play import tournament
     from rh17m.states import HUB_TASKS_ROOT
@@ -356,6 +365,15 @@ def main(argv: list[str] | None = None) -> int:
     lf.add_argument("--labels", default=str(DATA / "labels"))
     lf.add_argument("--loops", type=int, default=8, help="largest loop count in the fixed-point figure")
     lf.set_defaults(fn=_loop_figures)
+
+    le = sub.add_parser("loop-explainer", help="recorded activations of real decisions for docs/explainer")
+    le.add_argument("--run", required=True, help="a loop-edit run directory (runs/loop/<name>)")
+    le.add_argument("--out", default=str(Path(__file__).resolve().parents[2] / "docs" / "explainer" / "data"))
+    le.add_argument("--labels", default=str(DATA / "labels"))
+    le.add_argument("--figures", default=str(Path(__file__).resolve().parents[2] / "docs" / "figures" / "loop-edit"),
+                    help="the loop-figures output (reads measurements.json)")
+    le.add_argument("--count", type=int, default=3, help="decisions to record")
+    le.set_defaults(fn=_loop_explainer)
 
     cl = sub.add_parser("climb", help="hillclimb training/data settings on val with a noise floor")
     cl.add_argument("--labels", default=str(DATA / "labels"))

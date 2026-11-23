@@ -16,6 +16,23 @@ stays as it is; layers 1-3 and 4-6 become **one shared (sliding, sliding, full) 
 export stores layers 4-6 as byte-identical copies of 1-3. Full write-up, with the maths, every variant and
 the tuning history: **[docs/loop-edit.md](docs/loop-edit.md)**.
 
+**Interactive explainer: [rachittshah.github.io/railhead-17m/explainer](https://rachittshah.github.io/railhead-17m/explainer/)**
+(source in [`docs/explainer`](docs/explainer)). It follows three real decisions through both models in your
+browser:
+- switch between the original and looped models, and run the shared block 1 to 8 times;
+- see each option's rank move layer by layer;
+- open any layer for its real attention maps, the state text each option reads, and its MLP units;
+- read a step-by-step account of how the edit was made.
+
+<p align="center"><a href="https://rachittshah.github.io/railhead-17m/explainer/"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/explainer/explainer-dark.jpg">
+  <img src="docs/figures/explainer/explainer.jpg" alt="The explainer: each option's path through the looped model's layers, ranked by a probe at every layer, with the final choice probabilities and simulator values" width="100%">
+</picture></a></p>
+
+<details><summary>Recording: switching models, running 1-8 loops, inspecting a layer's attention</summary>
+<p align="center"><img src="docs/figures/explainer/explainer-demo.gif" alt="Screen recording of the explainer" width="100%"></p>
+</details>
+
 ```mermaid
 flowchart LR
     A["Trained incumbent<br/>7 distinct layers<br/>F S S F S S F"] --> B["Step 1: exact rewrites<br/>fold norms, align heads,<br/>value bases, RoPE phases,<br/>MLP units<br/>(same function, KL 4e-10)"]

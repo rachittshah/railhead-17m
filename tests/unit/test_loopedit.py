@@ -150,6 +150,33 @@ def test_fidelity_and_cluster_bootstrap():
     assert diff == 2.0 and lo == 1.0 and hi == 3.0  # the interval spans the maps, not the decisions
 
 
+def test_explainer_attention_walk_reproduces_the_model():
+    """The explainer's hand-written softmax attention gives the model's logits, and its weights are distributions."""
+    from rh17m import loopexplain as X
+
+    model = _model(4)
+    for seed in range(3):
+        batch = _batch(model, seed, count=1)
+        walk = X.attention_walk(model, batch)
+        k = int(np.array(batch.option_mask[0]).sum())
+        np.testing.assert_allclose(np.array(walk["logits"])[:k], _logits(model, batch)[0, :k], atol=1e-4)
+        assert walk["fused_error"] < 1e-4
+        assert len(walk["stages"]) == len(TYPES) + 1 and walk["probe"].shape[0] == len(TYPES) + 1
+        np.testing.assert_allclose(np.array(walk["probe"])[-1, :k], np.array(walk["logits"])[:k], atol=1e-6)
+        for index, layer in enumerate(walk["layers"]):
+            np.testing.assert_allclose(np.array(layer["option_weights"]).sum(-1), 1.0, atol=1e-5)
+            assert (layer["prefix_weights"] is None) == (index == len(TYPES) - 1)
+
+
+def test_prefix_sections_split_instruction_and_state():
+    from rh17m.loopexplain import prefix_sections
+
+    pieces = ["[CLS]", "Instruction", ":", " build", "?", "\n", "State", ":", " {}", "[SEP]"]
+    assert prefix_sections(pieces) == [{"name": "instruction", "start": 0, "end": 5},
+                                       {"name": "state", "start": 5, "end": 10}]
+    assert prefix_sections(["a", "b"]) == [{"name": "prefix", "start": 0, "end": 2}]
+
+
 def test_weights_round_trip():
     model = _model()
     w = L.weights(model)
