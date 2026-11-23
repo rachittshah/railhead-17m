@@ -25,6 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-timeout>=2.3", "ruff>=0.6"]
+viz = ["matplotlib>=3.9", "pillow>=10"]
 # The published Bekko runtime, used only as the parity reference for the MLX port.
 reference = ["decision-mlx[bekko]"]
 

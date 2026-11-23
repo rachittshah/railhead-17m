@@ -102,8 +102,9 @@ def _complex(rows: np.ndarray) -> np.ndarray:
     return rows[:half] + 1j * rows[half:]
 
 
-def align_attention(w: dict[str, np.ndarray], src: int, dst: int, heads: int) -> None:
-    """Re-gauge layer ``dst``'s attention onto ``src`` in place (exact): head order, value basis, q/k phases."""
+def align_attention(w: dict[str, np.ndarray], src: int, dst: int, heads: int) -> dict:
+    """Re-gauge layer ``dst``'s attention onto ``src`` in place (exact): head order, value basis, q/k phases.
+    Returns the head-similarity matrix and the matching (for the figures)."""
     wq_s, wo_s = w[key(src, "attn.Wqkv")], w[key(src, "attn.Wo")]
     wq_d, wo_d = w[key(dst, "attn.Wqkv")], w[key(dst, "attn.Wo")]
     dim = wo_s.shape[0]
@@ -126,7 +127,8 @@ def align_attention(w: dict[str, np.ndarray], src: int, dst: int, heads: int) ->
             sim[a, b] = s.sum() / (np.linalg.norm(vs) * np.linalg.norm(vd) + 1e-12) + mag.sum() / (qk + 1e-12)
             gauge[a, b] = (u @ vt, phase)
     new_q, new_o = np.empty_like(qd), np.empty_like(od)
-    for a, b in zip(*linear_sum_assignment(-sim), strict=True):
+    rows, cols = linear_sum_assignment(-sim)
+    for a, b in zip(rows, cols, strict=True):
         rot, phase = gauge[a, b]
         new_q[2, a] = rot @ qd[2, b]
         new_o[:, a, :] = od[:, b, :] @ rot.T
@@ -135,24 +137,28 @@ def align_attention(w: dict[str, np.ndarray], src: int, dst: int, heads: int) ->
             new_q[t, a] = np.concatenate([z.real, z.imag], axis=0)
     w[key(dst, "attn.Wqkv")] = new_q.reshape(wq_d.shape)
     w[key(dst, "attn.Wo")] = new_o.reshape(wo_d.shape)
+    return {"similarity": sim, "match": cols[np.argsort(rows)]}
 
 
 def _unit(rows: np.ndarray) -> np.ndarray:
     return rows / np.maximum(np.linalg.norm(rows, axis=1, keepdims=True), 1e-12)
 
 
-def align_mlp(w: dict[str, np.ndarray], src: int, dst: int) -> None:
-    """Re-gauge layer ``dst``'s GeGLU onto ``src`` in place (exact): neuron order and gate sign."""
+def align_mlp(w: dict[str, np.ndarray], src: int, dst: int) -> dict:
+    """Re-gauge layer ``dst``'s GeGLU onto ``src`` in place (exact): neuron order and gate sign.
+    Returns the neuron cost matrix, the order and the signs (for the figures)."""
     wi_s, wo_s = w[key(src, "mlp.Wi")], w[key(src, "mlp.Wo")]
     wi_d, wo_d = w[key(dst, "mlp.Wi")], w[key(dst, "mlp.Wo")]
     n = wo_s.shape[1]
     # gelu(a) * gate: the gate and the output column can flip sign together; a cannot (gelu is not odd).
     signed = _unit(wi_s[n:]) @ _unit(wi_d[n:]).T + _unit(wo_s.T) @ _unit(wo_d.T).T
-    rows, cols = linear_sum_assignment(-(_unit(wi_s[:n]) @ _unit(wi_d[:n]).T + np.abs(signed)))
+    cost = _unit(wi_s[:n]) @ _unit(wi_d[:n]).T + np.abs(signed)
+    rows, cols = linear_sum_assignment(-cost)
     order = cols[np.argsort(rows)]
     sign = np.where(signed[np.arange(n), order] < 0, -1.0, 1.0)
     w[key(dst, "mlp.Wi")] = np.concatenate([wi_d[:n][order], sign[:, None] * wi_d[n:][order]], axis=0)
     w[key(dst, "mlp.Wo")] = wo_d[:, order] * sign[None, :]
+    return {"cost": cost, "order": order, "sign": sign}
 
 
 def teacher_weights(w: dict[str, np.ndarray], block: int, loops: int, heads: int, *,
@@ -414,6 +420,19 @@ class LoopConfig:
     extra_loops: tuple[int, ...] = (1, 3, 4)  # also report the chosen block at these loop counts
 
 
+def selection(cfg: LoopConfig, examples: list[dict]) -> tuple[dict, list[dict], list[dict]]:
+    """Splits, the held-out train-map decisions that rank variants, and the calibration decisions."""
+    split = {s: [e for e in examples if e["split"] == s] for s in ("train", "val", "test")}
+    # Held-out TRAIN maps rank the variants; the calibration inputs come from the other train maps.
+    held_maps = set(sorted({e["task_id"] for e in split["train"]})[::4])
+    rng = random.Random(cfg.seed)
+    held = [e for e in split["train"] if e["task_id"] in held_maps]
+    held = rng.sample(held, min(cfg.holdout, len(held)))
+    pool = [e for e in split["train"] if e["task_id"] not in held_maps]
+    calib = rng.sample(pool, min(cfg.calib, len(pool)))
+    return split, held, calib
+
+
 def _batches(model, examples: list[dict], batch_size: int):
     from rh17m.train import LAYOUTS, _encoded
 
@@ -448,15 +467,7 @@ def run(cfg: LoopConfig, labels_dir: Path, out_dir: Path, log=print) -> dict:
     if loops < 2:
         raise ValueError("the model has a single block: nothing to tie")
 
-    examples = load_examples(Path(labels_dir))
-    split = {s: [e for e in examples if e["split"] == s] for s in ("train", "val", "test")}
-    # Held-out TRAIN maps rank the variants; the calibration inputs come from the other train maps.
-    held_maps = set(sorted({e["task_id"] for e in split["train"]})[::4])
-    rng = random.Random(cfg.seed)
-    held = [e for e in split["train"] if e["task_id"] in held_maps]
-    held = rng.sample(held, min(cfg.holdout, len(held)))
-    pool = [e for e in split["train"] if e["task_id"] not in held_maps]
-    calib = rng.sample(pool, min(cfg.calib, len(pool)))
+    split, held, calib = selection(cfg, load_examples(Path(labels_dir)))
     log(json.dumps({"examples": {k: len(v) for k, v in split.items()}, "calib": len(calib), "holdout": len(held),
                     "layers": len(types), "block": cfg.block, "loops": loops}))
 

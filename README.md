@@ -138,7 +138,13 @@ On the incumbent (`runs/loop/1023-1627-base-s1-loop2`):
 - **Regret:** val +0.007 [-0.046, +0.030] and test +0.020 [-0.024, +0.073], map bootstrap, neither significant.
 - **Not run:** the closed-loop gate.
 
-Full write-up, with the maths, every variant and the tuning history: `docs/loop-edit.md`.
+Full write-up, with the maths, every variant and the tuning history: `docs/loop-edit.md`. It has 14 figures
+(each with a light and dark version), an animation and 6 flowcharts. `rh17m loop-figures` regenerates them.
+
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loop-edit/architecture-dark.svg">
+  <img src="docs/figures/loop-edit/architecture.svg" alt="Original 7-layer model next to the looped model: layer 0 plus one block applied twice" width="100%">
+</picture></p>
 
 ## Metrics
 
