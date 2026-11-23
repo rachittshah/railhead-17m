@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Looped 17M Explainer</title>
+<meta name="description" content="Interactive explainer: how the Railhead 17M decision model reads a game state, and how its weights were edited into a looped transformer.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M5 12a7 7 0 1 1 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M12 19l-3-3m3 3l-3 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+    <div><div class="title">Looped 17M Explainer</div><div class="subtitle">Railhead's System-1 decision model, before and after a weight edit</div></div>
+  </div>
+  <div class="controls">
+    <label class="ctl"><span>Decision</span><select id="decision"></select></label>
+    <div class="ctl"><span>Model</span>
+      <div class="seg" id="model-seg" role="tablist">
+        <button data-model="original" role="tab">Original · 7 layers</button>
+        <button data-model="looped" role="tab" class="on">Looped · block ×n</button>
+      </div>
+    </div>
+    <label class="ctl" id="loops-ctl"><span>Loops <b id="loops-val">2</b></span><input type="range" id="loops" min="0" max="5" step="1" value="1"></label>
+    <label class="ctl"><span>Temperature <b id="temp-val">3.60</b></span><input type="range" id="temp" min="0.25" max="6" step="0.05" value="3.6"></label>
+    <button class="icon" id="theme" title="Toggle light/dark" aria-label="Toggle light or dark theme"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" fill="currentColor"/></svg></button>
+    <a class="icon" href="https://github.com/rachittshah/railhead-17m" title="Source on GitHub" aria-label="Source on GitHub"><svg viewBox="0 0 16 16" width="18" height="18"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
+  </div>
+</header>
+
+<main>
+  <section class="stage">
+    <div class="stage-head">
+      <div id="question" class="question"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div id="flow" class="flow" aria-label="Each option's path through the layers"></div>
+    <p class="note" id="flow-note"></p>
+  </section>
+
+  <section class="inspector" id="inspector">
+    <div class="insp-head">
+      <div>
+        <div class="eyebrow" id="insp-eyebrow">Layer inspector</div>
+        <h2 id="insp-title">Layer</h2>
+        <p id="insp-sub" class="muted"></p>
+      </div>
+      <div class="insp-ctl">
+        <div class="seg small" id="head-seg"></div>
+        <div class="seg small" id="focus-seg"></div>
+      </div>
+    </div>
+    <div class="insp-grid">
+      <div class="card">
+        <div class="card-title">Attention map <span class="muted" id="map-caption"></span></div>
+        <div class="map-wrap"><canvas id="map" width="520" height="520"></canvas><div id="map-overlay" class="map-overlay"></div></div>
+        <div class="map-axis"><span>rows = who reads (queries)</span><span>columns = what is read (keys)</span></div>
+      </div>
+      <div class="card">
+        <div class="card-title">What <span id="reader-name">this option</span> reads <span class="muted" id="reader-caption"></span></div>
+        <div id="reader" class="reader"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Where each option's attention goes <span class="muted">(this head, mean over the option's tokens)</span></div>
+        <div id="share"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">How much each sub-layer writes <span class="muted">(mean update size per option)</span></div>
+        <div id="updates"></div>
+      </div>
+      <div class="card wide">
+        <div class="card-title">MLP: the 12 most active GeGLU units <span class="muted">(gelu(a) · gate, mean over each option's tokens)</span></div>
+        <div id="neurons"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="space">
+    <div class="space-head">
+      <div><div class="eyebrow">Representation space</div><h2>The options moving through the encoder</h2>
+      <p class="muted">Each dot is one option: the mean of its branch tokens after the final norm, projected onto the two main directions shared by every model and loop count. Darker dots have higher simulator value; the ring marks the best option.</p></div>
+      <div class="space-ctl"><button id="play" class="btn">▶ Play</button><input type="range" id="stage" min="0" max="7" value="7"><span id="stage-name" class="mono"></span></div>
+    </div>
+    <div class="space-grid"><div id="space-a"></div><div id="space-b"></div></div>
+  </section>
+
+  <article class="story" id="story">
+    <div class="story-intro">
+      <div class="eyebrow">How the loop was made</div>
+      <h2>Turning seven layers into one block applied twice, by editing weights</h2>
+      <p>The trained model has seven distinct layers with the schedule <b>F S S F S S F</b> (F = full attention, S = sliding window of ±64 tokens). Layers 1–3 and 4–6 share a schedule, so they can become <b>one block run twice</b>. No gradient step was taken: two exact rewrites line the blocks up, then a closed-form fit ties them.</p>
+    </div>
+
+    <section class="chapter">
+      <div class="chapter-text">
+        <span class="step">1</span>
+        <h3>Two trained blocks speak different coordinates</h3>
+        <p>Many weight settings compute the exact same function: heads can be reordered, each head's value space rotated, each RoPE frequency pair turned, MLP units permuted and their gate signs flipped. Trained separately, the two blocks land in unrelated settings of these symmetries, so their weights look unrelated even when their jobs are similar.</p>
+        <p>Before alignment, the cosine similarity between matching weight matrices of the two blocks is about zero. Press the toggle to apply the exact re-gauge; the function is unchanged (KL to the original 4×10⁻¹⁰).</p>
+        <button class="btn" id="sim-toggle">Apply the re-gauge</button>
+      </div>
+      <div class="chapter-viz" id="viz-sim"></div>
+    </section>
+
+    <section class="chapter">
+      <div class="chapter-text">
+        <span class="step">2</span>
+        <h3>Matching attention heads</h3>
+        <p>Each head of layer 1 is scored against each head of layer 4 (and 2↔5, 3↔6): the best orthogonal fit of the value/output maps plus phase-aligned query/key maps. The Hungarian algorithm then picks the one-to-one matching with the highest total similarity. Layers 1 and 4 match in reverse order.</p>
+      </div>
+      <div class="chapter-viz" id="viz-heads"></div>
+    </section>
+
+    <section class="chapter">
+      <div class="chapter-text">
+        <span class="step">3</span>
+        <h3>Matching 384 MLP units</h3>
+        <p>The same idea for the GeGLU units: a 384 × 384 matching cost between units of the two layers. As trained it looks like noise. After the Hungarian permutation a bright diagonal appears: unit <i>i</i> of one layer has a partner unit <i>i</i> in the other. Roughly half the gate signs flip, which is what an arbitrary sign choice in training predicts.</p>
+        <div class="seg small" id="neuron-pair"></div>
+        <input type="range" id="neuron-mix" min="0" max="1" step="0.01" value="0" aria-label="blend from as-trained to re-ordered">
+        <div class="mix-labels"><span>as trained</span><span>re-ordered</span></div>
+      </div>
+      <div class="chapter-viz"><canvas id="viz-neurons" width="384" height="384"></canvas><div class="muted center" id="neuron-caption"></div></div>
+    </section>
+
+    <section class="chapter">
+      <div class="chapter-text">
+        <span class="step">4</span>
+        <h3>Tying: nine ways to make one block</h3>
+        <p>With both blocks in one gauge, one weight set has to serve both positions. Copying or averaging the weights uses no data and loses the most. <b>RegMean</b> solves a least-squares merge from each layer's input statistics; <b>least-squares sweeps</b> then refit every matrix of the tied block, in order, on the looped model's own activations (600 unlabelled train decisions). Bars: KL from the original's choice distribution on 400 held-out decisions; lower is closer.</p>
+      </div>
+      <div class="chapter-viz" id="viz-variants"></div>
+    </section>
+
+    <section class="chapter">
+      <div class="chapter-text">
+        <span class="step">5</span>
+        <h3>Where the copy goes wrong, and the fit does not</h3>
+        <p>Relative error of the residual stream against the original, layer by layer. A plain copy of layers 1–3 is exact through loop 1 (they are the original's own layers 1–3) and then drifts to 0.38, because layers 4–6 were never meant to receive those inputs. The fitted block gives up a little accuracy in loop 1 to end at 0.12.</p>
+      </div>
+      <div class="chapter-viz" id="viz-stream"></div>
+    </section>
+
+    <section class="chapter">
+      <div class="chapter-text">
+        <span class="step">6</span>
+        <h3>It is a real loop: run it more times</h3>
+        <p>The same tied block can be applied any number of times. One pass is far from the original; from two passes on, the distance stays flat, and the change each extra pass makes to the option states shrinks from 0.54 to 0.06. The block settles toward a fixed point instead of blowing up. Use the <b>Loops</b> slider at the top to run the flow above at 1–8 loops.</p>
+      </div>
+      <div class="chapter-viz" id="viz-loops"></div>
+    </section>
+
+    <section class="chapter">
+      <div class="chapter-text">
+        <span class="step">7</span>
+        <h3>What the simulator labels say</h3>
+        <p>Regret is the simulator value of the best option minus that of the picked option (asinh units; 0.1 ≈ 10% of net worth at the horizon). Intervals resample whole maps. Neither difference is significant. The encoder's unique layer weights drop from 3.90M to 2.23M; the 12.9M embedding table is unchanged. <b>The closed-loop gate (full games) has not been run</b>, so the looped model is not a replacement for the incumbent yet.</p>
+      </div>
+      <div class="chapter-viz" id="viz-regret"></div>
+    </section>
+
+    <footer class="foot">
+      <p>Everything on this page is recorded from the real models (<code>rh17m loop-explainer</code>); nothing here runs a model in your browser. The per-layer option scores in the flow are a probe (final norm + choice head applied to an intermediate stream), not an output the model computes before its last layer. Full write-up: <a href="https://github.com/rachittshah/railhead-17m/blob/main/docs/loop-edit.md">docs/loop-edit.md</a>.</p>
+    </footer>
+  </article>
+</main>
+<div id="tip" class="tip" role="tooltip"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
