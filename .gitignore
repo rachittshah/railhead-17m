@@ -20,3 +20,6 @@ runs/climb/last_n
 runs/play-v2/
 runs/play-devhub/*/
 runs/climb/incumbent.prev.json
+
+# The explainer's recorded activations are published with the page.
+!docs/explainer/data/
