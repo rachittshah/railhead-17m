@@ -9,6 +9,100 @@ counterfactual labels**: every option is actually built in a fork of the game an
 
 Status: work in progress. Results land in `runs/` and in the tables below as they are measured.
 
+## Looped variant: the 17M made a looped transformer by editing its weights (2026-11-21)
+
+`rh17m loop-edit` turns the trained model into a **looped transformer** without any gradient step. Layer 0
+stays as it is; layers 1-3 and 4-6 become **one shared (sliding, sliding, full) block applied twice**. The
+export stores layers 4-6 as byte-identical copies of 1-3. Full write-up, with the maths, every variant and
+the tuning history: **[docs/loop-edit.md](docs/loop-edit.md)**.
+
+```mermaid
+flowchart LR
+    A["Trained incumbent<br/>7 distinct layers<br/>F S S F S S F"] --> B["Step 1: exact rewrites<br/>fold norms, align heads,<br/>value bases, RoPE phases,<br/>MLP units<br/>(same function, KL 4e-10)"]
+    B --> C["Step 2: tie<br/>one weight set for<br/>layers 1-3 and 4-6"]
+    C --> D{"Rank 9 variants<br/>by KL to the incumbent<br/>on held-out train maps"}
+    D -->|"chosen: RegMean +<br/>4 least-squares sweeps"| E["Looped model<br/>layer 0 + BLOCK x2<br/>KL 0.19 on val/test"]
+    E --> F["Saved unrolled, reloaded,<br/>checked bit-identical,<br/>PyTorch parity 1.1e-6"]
+```
+
+**The model, before and after.** Layer types, attention windows and parameters per layer, drawn from the
+real config. Loop 2 is dashed because it holds no weights of its own.
+
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loop-edit/architecture-dark.svg">
+  <img src="docs/figures/loop-edit/architecture.svg" alt="Original 7-layer model next to the looped model: layer 0 plus one block applied twice" width="100%">
+</picture></p>
+
+**One decision through both models.** Each point is one of 8 options, followed layer by layer; darker means
+higher simulator value and the ring marks the best option. Original on the left, looped on the right.
+
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loop-edit/trajectory-dark.gif">
+  <img src="docs/figures/loop-edit/trajectory.gif" alt="Animation: eight options of one decision moving through the layers of the original and the looped model" width="100%">
+</picture></p>
+
+**Step 1, aligning the two blocks.** Trained blocks can't be compared until their heads and neurons are
+matched. Head matching for each layer pair, with the chosen pairing boxed (layers 1 and 4 match in reverse
+order):
+
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loop-edit/head-match-dark.svg">
+  <img src="docs/figures/loop-edit/head-match.svg" alt="Head-to-head similarity for each layer pair with the Hungarian matching boxed" width="100%">
+</picture></p>
+
+The 384×384 MLP neuron comparison looks like noise as trained, and a diagonal appears after reordering;
+about half the gate signs flip (195, 181 and 179 of 384):
+
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loop-edit/neuron-match-dark.svg">
+  <img src="docs/figures/loop-edit/neuron-match.svg" alt="MLP neuron similarity before and after the permutation" width="100%">
+</picture></p>
+
+**Step 2, tying the blocks.** All 9 ways of tying them, ranked by KL to the original on held-out train maps.
+Ties made from the weights alone (copying or averaging the blocks) give KL 0.68-0.89. RegMean gives 0.40,
+and four least-squares sweeps on the looped model's own activations bring it to 0.14:
+
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loop-edit/variants-dark.svg">
+  <img src="docs/figures/loop-edit/variants.svg" alt="KL to the original and top-1 agreement for each tie variant" width="100%">
+</picture></p>
+
+Where each version drifts from the original, layer by layer. The weights-only copy is exact in loop 1 and
+ends at 0.38 relative error; the chosen edit stays below the plain merge at every layer and ends at 0.12:
+
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loop-edit/stream-error-dark.svg">
+  <img src="docs/figures/loop-edit/stream-error.svg" alt="Relative residual-stream error per layer for copy, RegMean and the chosen edit" width="100%">
+</picture></p>
+
+**It is a real loop.** The same block run 1 to 8 times: KL stays between 0.138 and 0.158 from 2 loops on,
+and the change per extra loop shrinks from 0.54 to 0.058, so the state settles instead of blowing up.
+
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loop-edit/fixed-point-dark.svg">
+  <img src="docs/figures/loop-edit/fixed-point.svg" alt="KL and per-loop representation change for 1 to 8 loops" width="100%">
+</picture></p>
+
+**Results on the incumbent** (`runs/loop/1023-1627-base-s1-loop2`):
+
+| | val | test |
+|---|---|---|
+| KL to the original | 0.19 | 0.19 |
+| top-1 agreement with the original | 0.58 | 0.59 |
+| regret, looped minus original [95% interval, maps resampled] | +0.007 [-0.046, +0.030] | +0.020 [-0.024, +0.073] |
+
+Neither regret difference is significant. The encoder's unique layer weights drop from 3.90M to 2.23M; the
+embeddings (12.89M) are unchanged. **Not run yet: the closed-loop gate**, so the looped model is not a
+replacement for the incumbent.
+
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loop-edit/regret-dark.svg">
+  <img src="docs/figures/loop-edit/regret.svg" alt="Regret of the looped model minus the original on val and test with intervals" width="100%">
+</picture></p>
+
+The write-up has all 14 figures (each in light and dark), the animation and 6 flowcharts;
+`rh17m loop-figures` regenerates them from a run.
+
 ## Results so far (2026-10-23, incumbent `1023-1627-base-s1`)
 
 **Closed loop**, 11 held-out 512x512 dev maps (10-year games + run-off), one seed per map, a decision every 180
@@ -120,31 +214,6 @@ decision state (savegame)                       options: 8 air candidates (route
   training and in closed-loop play.
 - Training: soft-target cross-entropy, AdamW (encoder 1e-4, heads 5e-4), option-order shuffling and both
   prefix layouts as augmentation, epoch selection on val expected regret, temperature fitted on val NLL.
-
-## Looped variant (weight edit, 2026-11-21)
-
-`rh17m loop-edit` turns a trained model into a looped transformer by editing its weights, with no gradient
-step. The result is layer 0 plus one (sliding, sliding, full) block applied twice; layers 4-6 are
-byte-identical to 1-3.
-
-1. Exact rewrites put both blocks in one gauge: LayerNorm gains folded into the next Linear, attention heads
-   permuted, value bases rotated, RoPE-pair phases turned, MLP neurons permuted and gate signs flipped.
-2. The blocks are then tied by closed-form least squares on the looped model's own activations, using 600
-   unlabelled train decisions.
-
-On the incumbent (`runs/loop/1023-1627-base-s1-loop2`):
-
-- **Fidelity:** val/test KL to the original is 0.19, with top-1 agreement of 0.58 / 0.59.
-- **Regret:** val +0.007 [-0.046, +0.030] and test +0.020 [-0.024, +0.073], map bootstrap, neither significant.
-- **Not run:** the closed-loop gate.
-
-Full write-up, with the maths, every variant and the tuning history: `docs/loop-edit.md`. It has 14 figures
-(each with a light and dark version), an animation and 6 flowcharts. `rh17m loop-figures` regenerates them.
-
-<p align="center"><picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loop-edit/architecture-dark.svg">
-  <img src="docs/figures/loop-edit/architecture.svg" alt="Original 7-layer model next to the looped model: layer 0 plus one block applied twice" width="100%">
-</picture></p>
 
 ## Metrics
 
